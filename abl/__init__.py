@@ -10,6 +10,7 @@ from .models import (
 from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
 from .engine import evaluate_snapshot
 from .runner import run_collateral_report
+from .importer import load_invoices_from_csv, parse_invoice_row, parse_invoices
 
 __all__ = [
     "CollateralReport",
@@ -22,4 +23,7 @@ __all__ = [
     "make_fixed_fx_provider",
     "evaluate_snapshot",
     "run_collateral_report",
+    "load_invoices_from_csv",
+    "parse_invoice_row",
+    "parse_invoices",
 ]
