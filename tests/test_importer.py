@@ -26,7 +26,7 @@ class TestImporter(unittest.TestCase):
                 due_date=date(2025, 2, 15),
                 invoice_amount=Decimal("15000.50"),
                 currency="CAD",
-                invoice_paid_date=None,
+                paid_date=None,
                 invoice_id="",
             ),
         )
@@ -43,7 +43,7 @@ class TestImporter(unittest.TestCase):
         inv = parse_invoice_row(row, 3)
         self.assertEqual(inv.invoice_amount, Decimal("2500.00"))
         self.assertEqual(inv.currency, "USD")
-        self.assertEqual(inv.invoice_paid_date, date(2025, 1, 20))
+        self.assertEqual(inv.paid_date, date(2025, 1, 20))
 
     def test_missing_client_name_raises(self):
         row = {

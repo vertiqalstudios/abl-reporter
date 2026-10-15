@@ -19,10 +19,10 @@ class TestRules(unittest.TestCase):
         inv_future = Invoice("A", date(2025, 3, 5), date(2025, 4, 5), Decimal("100"), "CAD")
         self.assertFalse(is_invoice_open(inv_future, as_of))
 
-        inv_paid = Invoice("A", date(2025, 1, 1), date(2025, 2, 1), Decimal("100"), "CAD", invoice_paid_date=date(2025, 2, 28))
+        inv_paid = Invoice("A", date(2025, 1, 1), date(2025, 2, 1), Decimal("100"), "CAD", paid_date=date(2025, 2, 28))
         self.assertFalse(is_invoice_open(inv_paid, as_of))
 
-        inv_paid_later = Invoice("A", date(2025, 1, 1), date(2025, 2, 1), Decimal("100"), "CAD", invoice_paid_date=date(2025, 3, 2))
+        inv_paid_later = Invoice("A", date(2025, 1, 1), date(2025, 2, 1), Decimal("100"), "CAD", paid_date=date(2025, 3, 2))
         self.assertTrue(is_invoice_open(inv_paid_later, as_of))
 
         inv_unpaid = Invoice("A", date(2025, 1, 1), date(2025, 2, 1), Decimal("100"), "CAD")

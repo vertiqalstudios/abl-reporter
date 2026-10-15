@@ -73,7 +73,7 @@ def evaluate_snapshot(
                     due_date=inv.due_date,
                     invoice_amount=inv.invoice_amount,
                     currency=inv.currency,
-                    invoice_paid_date=inv.invoice_paid_date,
+                    paid_date=inv.paid_date,
                     invoice_id=inv.invoice_id,
                     eligible_balance=Decimal("0.00"),
                     ineligible_balance=inv.invoice_amount,
@@ -112,7 +112,7 @@ def evaluate_snapshot(
                     due_date=inv.due_date,
                     invoice_amount=eligible_portion,
                     currency=inv.currency,
-                    invoice_paid_date=inv.invoice_paid_date,
+                    paid_date=inv.paid_date,
                     invoice_id=inv.invoice_id,
                 )
             )
@@ -123,7 +123,7 @@ def evaluate_snapshot(
                     due_date=inv.due_date,
                     invoice_amount=inv.invoice_amount,
                     currency=inv.currency,
-                    invoice_paid_date=inv.invoice_paid_date,
+                    paid_date=inv.paid_date,
                     invoice_id=inv.invoice_id,
                     eligible_balance=eligible_portion,
                     ineligible_balance=ineligible_portion,

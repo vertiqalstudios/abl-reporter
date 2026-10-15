@@ -25,7 +25,7 @@ class Invoice:
     due_date: date
     invoice_amount: Decimal
     currency: str
-    invoice_paid_date: date | None = None
+    paid_date: date | None = None
     invoice_id: str = ""
 
 
