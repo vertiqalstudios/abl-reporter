@@ -33,6 +33,6 @@ def convert_to_cad(inv: Invoice, as_of: date, fx: FXProvider) -> Invoice:
         due_date=inv.due_date,
         invoice_amount=cad_amount,
         currency="CAD",
-        invoice_paid_date=inv.invoice_paid_date,
+        paid_date=inv.paid_date,
         invoice_id=inv.invoice_id,
     )

@@ -67,7 +67,7 @@ def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
     invoice_date = _parse_date(row["Invoice Date"], "Invoice Date", line_num)
     due_date = _parse_date(row["Due Date"], "Due Date", line_num)
     invoice_amount = _parse_amount(row["Invoice Amount"], line_num)
-    invoice_paid_date = _parse_optional_date(
+    paid_date = _parse_optional_date(
         row["Invoice Paid Date"], "Invoice Paid Date", line_num
     )
 
@@ -77,7 +77,7 @@ def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
         due_date=due_date,
         invoice_amount=invoice_amount,
         currency=currency,
-        invoice_paid_date=invoice_paid_date,
+        paid_date=paid_date,
         invoice_id="",
     )
 

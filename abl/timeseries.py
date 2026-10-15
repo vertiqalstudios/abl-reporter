@@ -44,7 +44,7 @@ _CENTS = Decimal("0.01")
 
 
 def _get_invoice_amount(inv: Invoice) -> Decimal:
-    return inv.amount
+    return inv.invoice_amount
 
 
 def _convert_currency(
@@ -55,13 +55,15 @@ def _convert_currency(
 ) -> Decimal:
     if from_currency == to_currency:
         return amount
+    if fx is None:
+        raise ValueError(f"FXProvider required for conversion from {from_currency} to {to_currency}")
     if to_currency == "CAD":
         return convert_to_cad(amount, from_currency, fx)
     raise ValueError(f"Unsupported target currency: {to_currency}; expected CAD")
 
 
 def _is_active_ar(inv: Invoice, as_of: date) -> bool:
-    if inv.issue_date > as_of:
+    if inv.invoice_date > as_of:
         return False
     if inv.paid_date is not None and inv.paid_date <= as_of:
         return False
@@ -70,9 +72,9 @@ def _is_active_ar(inv: Invoice, as_of: date) -> bool:
 
 def _is_lookback_sale(inv: Invoice, as_of: date, lookback_days: int) -> bool:
     start_window = as_of - timedelta(days=lookback_days)
-    if inv.issue_date < start_window:
+    if inv.invoice_date < start_window:
         return False
-    if inv.issue_date > as_of:
+    if inv.invoice_date > as_of:
         return False
     return True
 
@@ -112,7 +114,7 @@ def _build_active_record(
 ) -> _ActiveInvoiceRecord:
     raw_amount = _get_invoice_amount(inv)
     converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx)
-    age_days = (as_of - inv.issue_date).days
+    age_days = (as_of - inv.invoice_date).days
     dpd = _calculate_dpd(inv, as_of)
     bucket = _classify_aging_bucket(dpd)
     return _ActiveInvoiceRecord(

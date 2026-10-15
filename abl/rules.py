@@ -10,7 +10,7 @@ def is_invoice_open(inv: Invoice, as_of: date) -> bool:
     """Checks whether an invoice is uncollected and outstanding at as_of date."""
     if inv.invoice_date > as_of:
         return False
-    if inv.invoice_paid_date is not None and inv.invoice_paid_date <= as_of:
+    if inv.paid_date is not None and inv.paid_date <= as_of:
         return False
     return True
 
