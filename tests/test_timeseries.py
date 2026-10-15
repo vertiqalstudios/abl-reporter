@@ -148,6 +148,49 @@ class TestTimeSeriesModule(unittest.TestCase):
         )
         self.assertEqual(series, ())
 
+    def test_cad_identity_and_defaults(self) -> None:
+        inv = _create_invoice(
+            amount=Decimal("100.00"),
+            currency="CAD",
+            issue_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 31),
+        )
+        snapshot = compute_weekly_snapshot(
+            invoices=(inv,),
+            as_of_date=date(2026, 1, 15),
+        )
+        self.assertEqual(snapshot.currency, "CAD")
+        self.assertEqual(snapshot.total_ar, Decimal("100.00"))
+
+    def test_missing_fx_provider_for_cad_conversion(self) -> None:
+        inv = _create_invoice(
+            amount=Decimal("100.00"),
+            currency="USD",
+            issue_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 31),
+        )
+        with self.assertRaises(ValueError):
+            compute_weekly_snapshot(
+                invoices=(inv,),
+                as_of_date=date(2026, 1, 15),
+                currency="CAD",
+                fx=None,
+            )
+
+    def test_unsupported_target_currency_conversion(self) -> None:
+        inv = _create_invoice(
+            amount=Decimal("100.00"),
+            currency="USD",
+            issue_date=date(2026, 1, 1),
+            due_date=date(2026, 1, 31),
+        )
+        with self.assertRaises(ValueError):
+            compute_weekly_snapshot(
+                invoices=(inv,),
+                as_of_date=date(2026, 1, 15),
+                currency="EUR",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

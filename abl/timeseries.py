@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 
-from abl.fx import FXTable
+from abl.fx import FXProvider, convert_to_cad
 from abl.models import Invoice
 
 
@@ -51,13 +51,13 @@ def _convert_currency(
     amount: Decimal,
     from_currency: str,
     to_currency: str,
-    fx: FXTable | None,
+    fx: FXProvider | None,
 ) -> Decimal:
     if from_currency == to_currency:
         return amount
-    if fx is None:
-        raise ValueError(f"FXTable required for conversion from {from_currency} to {to_currency}")
-    return fx.convert(amount, from_currency, to_currency)
+    if to_currency == "CAD":
+        return convert_to_cad(amount, from_currency, fx)
+    raise ValueError(f"Unsupported target currency: {to_currency}; expected CAD")
 
 
 def _is_active_ar(inv: Invoice, as_of: date) -> bool:
@@ -108,7 +108,7 @@ def _build_active_record(
     inv: Invoice,
     as_of: date,
     currency: str,
-    fx: FXTable | None,
+    fx: FXProvider | None,
 ) -> _ActiveInvoiceRecord:
     raw_amount = _get_invoice_amount(inv)
     converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx)
@@ -149,8 +149,8 @@ def _empty_snapshot(
 def compute_weekly_snapshot(
     invoices: tuple[Invoice, ...],
     as_of_date: date,
-    currency: str,
-    fx: FXTable | None = None,
+    currency: str = "CAD",
+    fx: FXProvider | None = None,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> WeeklyDSOSnapshot:
     lookback_invoices = [inv for inv in invoices if _is_lookback_sale(inv, as_of_date, config.lookback_days)]
@@ -242,8 +242,8 @@ def compute_weekly_dso(
     invoices: tuple[Invoice, ...],
     start_date: date,
     end_date: date,
-    currency: str,
-    fx: FXTable | None = None,
+    currency: str = "CAD",
+    fx: FXProvider | None = None,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> WeeklyTimeSeries:
     if start_date > end_date:
