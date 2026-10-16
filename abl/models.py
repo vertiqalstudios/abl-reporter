@@ -80,3 +80,51 @@ class CollateralReport:
     @property
     def as_of_date(self) -> date:
         return self.week.date()
+
+
+class ReportStatus(StrEnum):
+    PRO_FORMA = "PRO_FORMA"
+    DRAFT = "DRAFT"
+    CERTIFIED = "CERTIFIED"
+
+
+@dataclass(frozen=True, slots=True)
+class DebtorConcentration:
+    client_name: str
+    balance_cad: Decimal
+    share_pct: Decimal
+    is_capped: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReportPalette:
+    primary: str = "#0F172A"
+    muted: str = "#64748B"
+    subtle: str = "#94A3B8"
+    accent: str = "#0F766E"
+    alert: str = "#991B1B"
+    border: str = "#E2E8F0"
+    bg_subtle: str = "#F8FAFC"
+    debtor_colors: tuple[str, ...] = (
+        "#1E293B",
+        "#334155",
+        "#475569",
+        "#64748B",
+        "#94A3B8",
+        "#CBD5E1",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CertificateParams:
+    as_of: date
+    status: ReportStatus = ReportStatus.PRO_FORMA
+    existing_borrow: Decimal = Decimal("0.00")
+    facility_limit: Decimal = Decimal("2000000.00")
+    currency: str = "CAD"
+    disclaimer: str = (
+        "Highly confidential, Material Non-Public Information. "
+        "For Internal Use and Lender Use only"
+    )
+    generated_at: datetime = field(default_factory=datetime.now)
+
