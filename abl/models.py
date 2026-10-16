@@ -1,14 +1,7 @@
-import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
+from enum import StrEnum
 
 
 class IneligibilityReason(StrEnum):
