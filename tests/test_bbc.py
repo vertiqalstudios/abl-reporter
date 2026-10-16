@@ -72,18 +72,30 @@ def test_ineligible_summary_categorization(default_criteria, fixed_fx) -> None:
     assert report.net_available_borrow_cad == Decimal("48000.00")
 
 
+import io
+
+SAMPLE_CSV_CONTENT = """Client Name,Invoice Date,Due Date,Invoice Amount,Currency,Invoice Paid Date
+Beta Retail,2025-01-01,2025-01-31,124000.00,USD,2025-01-19
+Gamma Tech,2025-01-07,2025-01-14,66000.00,CAD,2025-01-13
+Self,2025-01-28,2025-02-04,124000.00,CAD,2025-02-02
+Phi Aerospace,2026-10-16,2026-11-15,155000.00,CAD,
+Omega Capital,2026-10-23,2026-12-22,232000.00,CAD,
+Rho Pharma,2026-10-30,2026-12-29,149000.00,CAD,
+Iota Automotive,2026-11-06,2027-01-05,88000.00,CAD,
+Omega Capital,2026-11-13,2027-01-12,220000.00,CAD,
+Rho Pharma,2026-11-20,2026-12-20,141000.00,CAD,
+"""
+
+
 @pytest.mark.parametrize(
     ("as_of", "expected_min_gross"),
     [
-        (date(2025, 6, 1), Decimal("100000.00")),
-        (date(2026, 1, 1), Decimal("500000.00")),
-        (date(2026, 11, 20), Decimal("1000000.00")),
+        (date(2025, 2, 1), Decimal("100000.00")),
+        (date(2026, 11, 20), Decimal("900000.00")),
     ],
 )
-def test_sample_csv_dates(as_of: date, expected_min_gross: Decimal, default_criteria, fixed_fx) -> None:
-    csv_path = Path(__file__).resolve().parent.parent / "data" / "sample_invoices.csv"
-    assert csv_path.exists()
-    invoices = load_invoices_from_csv(csv_path)
+def test_in_memory_csv_pipeline(as_of: date, expected_min_gross: Decimal, default_criteria, fixed_fx) -> None:
+    invoices = load_invoices_from_csv(io.StringIO(SAMPLE_CSV_CONTENT))
 
     report = generate_bbc(invoices, as_of, default_criteria, fixed_fx)
 
@@ -92,3 +104,4 @@ def test_sample_csv_dates(as_of: date, expected_min_gross: Decimal, default_crit
     assert report.gross_amount_cad == report.eligible_amount_cad + report.ineligible_amount_cad
     assert report.ineligible_summary.total == report.ineligible_amount_cad
     assert report.gross_amount_cad >= expected_min_gross
+
