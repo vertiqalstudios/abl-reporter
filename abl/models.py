@@ -2,7 +2,13 @@ import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
 
 
 class IneligibilityReason(StrEnum):
@@ -10,6 +16,23 @@ class IneligibilityReason(StrEnum):
     AGED_OVERDUE = "AGED_OVERDUE"
     CROSS_DEFAULT_TAINT = "CROSS_DEFAULT_TAINT"
     CONCENTRATION_EXCESS = "CONCENTRATION_EXCESS"
+
+
+@dataclass(frozen=True, slots=True)
+class IneligibilitySummary:
+    contra: Decimal = Decimal("0.00")
+    aged_overdue: Decimal = Decimal("0.00")
+    cross_default: Decimal = Decimal("0.00")
+    concentration_excess: Decimal = Decimal("0.00")
+
+    @property
+    def total(self) -> Decimal:
+        return (
+            self.contra
+            + self.aged_overdue
+            + self.cross_default
+            + self.concentration_excess
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +70,7 @@ class LendingCriteria:
         return max(Decimal("0.00"), self.advance_rate - self.dilution_reserve_pct)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class CollateralReport:
     week: datetime
     eligible_amount_cad: Decimal
@@ -55,3 +78,12 @@ class CollateralReport:
     net_available_borrow_cad: Decimal
     eligible_invoices: list[Invoice] = field(default_factory=list)
     ineligible_invoices: list[InvoiceWithReason] = field(default_factory=list)
+    ineligible_summary: IneligibilitySummary = field(default_factory=IneligibilitySummary)
+
+    @property
+    def gross_amount_cad(self) -> Decimal:
+        return self.eligible_amount_cad + self.ineligible_amount_cad
+
+    @property
+    def as_of_date(self) -> date:
+        return self.week.date()
