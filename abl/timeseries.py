@@ -1,9 +1,10 @@
+import pandas as pd
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 
-from abl.fx import FXProvider, convert_to_cad
+from abl.fx import FXProvider
 from abl.models import Invoice
 
 
@@ -52,14 +53,17 @@ def _convert_currency(
     from_currency: str,
     to_currency: str,
     fx: FXProvider | None,
-    as_of: date,
+    as_of: date | None = None,
 ) -> Decimal:
     if from_currency == to_currency:
         return amount
     if fx is None:
-        raise ValueError(f"FXProvider required for conversion from {from_currency} to {to_currency}")
+        raise ValueError(
+            f"FXProvider required for conversion from {from_currency} to {to_currency}"
+        )
     if to_currency == "CAD":
-        rate = fx(from_currency, "CAD", as_of)
+        eval_date = as_of or date.today()
+        rate = fx(from_currency, "CAD", eval_date)
         return (amount * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     raise ValueError(f"Unsupported target currency: {to_currency}; expected CAD")
 
@@ -157,15 +161,26 @@ def compute_weekly_snapshot(
     fx: FXProvider | None = None,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> WeeklyDSOSnapshot:
-    lookback_invoices = [inv for inv in invoices if _is_lookback_sale(inv, as_of_date, config.lookback_days)]
+    lookback_invoices = [
+        inv
+        for inv in invoices
+        if _is_lookback_sale(inv, as_of_date, config.lookback_days)
+    ]
     lookback_sales = sum(
-        (_convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx, as_of_date) for inv in lookback_invoices),
+        (
+            _convert_currency(
+                _get_invoice_amount(inv), inv.currency, currency, fx, as_of_date
+            )
+            for inv in lookback_invoices
+        ),
         start=Decimal("0"),
     )
 
     active_invoices = [inv for inv in invoices if _is_active_ar(inv, as_of_date)]
     all_active_amounts = [
-        _convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx, as_of_date)
+        _convert_currency(
+            _get_invoice_amount(inv), inv.currency, currency, fx, as_of_date
+        )
         for inv in active_invoices
     ]
     total_ar = sum(all_active_amounts, start=Decimal("0"))
@@ -179,7 +194,9 @@ def compute_weekly_snapshot(
     if not positive_records:
         return _empty_snapshot(as_of_date, currency, lookback_sales, total_ar)
 
-    positive_balance_sum = sum((record.amount for record in positive_records), start=Decimal("0"))
+    positive_balance_sum = sum(
+        (record.amount for record in positive_records), start=Decimal("0")
+    )
     if positive_balance_sum <= Decimal("0"):
         return _empty_snapshot(as_of_date, currency, lookback_sales, total_ar)
 
@@ -191,37 +208,61 @@ def compute_weekly_snapshot(
         (record.amount * Decimal(record.age_days) for record in positive_records),
         start=Decimal("0"),
     )
-    dso_dollar_weight = (weighted_age_sum / positive_balance_sum).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    dso_dollar_weight = (weighted_age_sum / positive_balance_sum).quantize(
+        _CENTS, rounding=ROUND_HALF_UP
+    )
 
     max_dpd = max(record.dpd for record in positive_records)
     weighted_dpd_sum = sum(
         (record.amount * Decimal(record.dpd) for record in positive_records),
         start=Decimal("0"),
     )
-    weighted_avg_dpd = (weighted_dpd_sum / positive_balance_sum).quantize(_CENTS, rounding=ROUND_HALF_UP)
+    weighted_avg_dpd = (weighted_dpd_sum / positive_balance_sum).quantize(
+        _CENTS, rounding=ROUND_HALF_UP
+    )
 
     bucket_current = sum(
-        (record.amount for record in positive_records if record.bucket == AgingBucket.CURRENT),
+        (
+            record.amount
+            for record in positive_records
+            if record.bucket == AgingBucket.CURRENT
+        ),
         start=Decimal("0"),
     ).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
     bucket_1_30 = sum(
-        (record.amount for record in positive_records if record.bucket == AgingBucket.DAYS_1_30),
+        (
+            record.amount
+            for record in positive_records
+            if record.bucket == AgingBucket.DAYS_1_30
+        ),
         start=Decimal("0"),
     ).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
     bucket_31_60 = sum(
-        (record.amount for record in positive_records if record.bucket == AgingBucket.DAYS_31_60),
+        (
+            record.amount
+            for record in positive_records
+            if record.bucket == AgingBucket.DAYS_31_60
+        ),
         start=Decimal("0"),
     ).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
     bucket_61_90 = sum(
-        (record.amount for record in positive_records if record.bucket == AgingBucket.DAYS_61_90),
+        (
+            record.amount
+            for record in positive_records
+            if record.bucket == AgingBucket.DAYS_61_90
+        ),
         start=Decimal("0"),
     ).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
     bucket_90_plus = sum(
-        (record.amount for record in positive_records if record.bucket == AgingBucket.DAYS_90_PLUS),
+        (
+            record.amount
+            for record in positive_records
+            if record.bucket == AgingBucket.DAYS_90_PLUS
+        ),
         start=Decimal("0"),
     ).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
@@ -269,3 +310,114 @@ def compute_weekly_dso(
         current_date += step
 
     return tuple(snapshots)
+
+
+@dataclass(slots=True)
+class ClientVolume:
+    client_name: str
+    volume: Decimal = Decimal("0")
+
+
+@dataclass(frozen=True, slots=True)
+class TopNCustomersResult:
+    top_n_balances: dict[str, Decimal]
+    other_balance: Decimal
+
+    @property
+    def top_n_names(self) -> set[str]:
+        return set(self.top_n_balances.keys())
+
+
+def get_top_n_customers(
+    invoices: tuple[Invoice, ...],
+    start_date: date,
+    end_date: date,
+    top_n: int,
+    currency: str = "CAD",
+    fx: FXProvider | None = None,
+) -> TopNCustomersResult:
+    """Calculates the Top N customers by total invoiced volume during the period."""
+    client_volumes: dict[str, ClientVolume] = {}
+
+    for inv in invoices:
+        if start_date <= inv.invoice_date <= end_date:
+            amount = _convert_currency(
+                _get_invoice_amount(inv), inv.currency, currency, fx, inv.invoice_date
+            )
+            if inv.client_name not in client_volumes:
+                client_volumes[inv.client_name] = ClientVolume(
+                    client_name=inv.client_name
+                )
+            client_volumes[inv.client_name].volume += amount
+
+    sorted_clients = sorted(
+        client_volumes.values(), key=lambda cv: cv.volume, reverse=True
+    )
+    top_clients_list = sorted_clients[:top_n]
+    other_clients_list = sorted_clients[top_n:]
+
+    top_n_balances = {cv.client_name: cv.volume for cv in top_clients_list}
+    other_balance = sum((cv.volume for cv in other_clients_list), Decimal("0"))
+
+    return TopNCustomersResult(
+        top_n_balances=top_n_balances, other_balance=other_balance
+    )
+
+
+def customer_ar_balances(
+    invoices: tuple[Invoice, ...],
+    start_date: date,
+    end_date: date,
+    currency: str = "CAD",
+    fx: FXProvider | None = None,
+    top_n: int = 4,
+    config: TimeSeriesConfig = TimeSeriesConfig(),
+) -> pd.DataFrame:
+
+    top_n_result = get_top_n_customers(
+        invoices, start_date, end_date, top_n, currency, fx
+    )
+    top_n_clients = top_n_result.top_n_names
+
+    step = timedelta(days=config.step_days)
+    current_date = start_date
+    records = []
+
+    while current_date <= end_date:
+        active_invoices = [inv for inv in invoices if _is_active_ar(inv, current_date)]
+
+        week_balances: dict[str, ClientVolume] = {}
+        for inv in active_invoices:
+            amount = _convert_currency(
+                _get_invoice_amount(inv), inv.currency, currency, fx, current_date
+            )
+            if inv.client_name not in week_balances:
+                week_balances[inv.client_name] = ClientVolume(
+                    client_name=inv.client_name
+                )
+            week_balances[inv.client_name].volume += amount
+
+        if not week_balances:
+            # Preserve the date index with a null record when AR is empty
+            records.append(
+                {
+                    "as_of_date": current_date,
+                    "client_name": "NONE",
+                    "balance": 0.0,
+                    "is_top_n": False,
+                }
+            )
+        else:
+            for client_name, cv in week_balances.items():
+                records.append(
+                    {
+                        "as_of_date": current_date,
+                        "client_name": client_name,
+                        "balance": float(cv.volume),
+                        "is_top_n": client_name in top_n_clients,
+                    }
+                )
+
+        current_date += step
+
+    return pd.DataFrame(records)

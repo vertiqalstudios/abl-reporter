@@ -122,6 +122,7 @@ def load_invoices_from_csv(source: Path | str | TextIO) -> list[Invoice]:
 
     raise FileNotFoundError(f"CSV file not found: {source}")
 
+
 if __name__ == "__main__":
     file = "invoices.csv"
     invoices = load_invoices_from_csv(file)

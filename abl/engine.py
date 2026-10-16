@@ -62,8 +62,14 @@ def evaluate_snapshot(
     for inv in open_invoices:
         reason = (
             check_contra(inv.client_name, criteria.contra_clients)
-            or check_aged_overdue(inv.due_date, snapshot_date, criteria.max_overdue_days)
-            or (check_cross_default(inv.client_name, tainted_clients) if criteria.cross_default_enabled else None)
+            or check_aged_overdue(
+                inv.due_date, snapshot_date, criteria.max_overdue_days
+            )
+            or (
+                check_cross_default(inv.client_name, tainted_clients)
+                if criteria.cross_default_enabled
+                else None
+            )
         )
         if reason is not None:
             ineligible_records.append(
@@ -85,8 +91,12 @@ def evaluate_snapshot(
             eligible_candidates.append(inv)
 
     # 3. Debtor Concentration Cap Screening
-    gross_eligible = sum((inv.invoice_amount for inv in eligible_candidates), Decimal("0.00"))
-    max_debtor_cap = calculate_concentration_cap(gross_eligible, criteria.max_client_concentration_pct)
+    gross_eligible = sum(
+        (inv.invoice_amount for inv in eligible_candidates), Decimal("0.00")
+    )
+    max_debtor_cap = calculate_concentration_cap(
+        gross_eligible, criteria.max_client_concentration_pct
+    )
 
     by_client: dict[str, list[Invoice]] = defaultdict(list)
     for inv in eligible_candidates:
@@ -102,7 +112,9 @@ def evaluate_snapshot(
 
         coverage_ratio = max_debtor_cap / client_total
         for inv in client_invs:
-            eligible_portion = (inv.invoice_amount * coverage_ratio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            eligible_portion = (inv.invoice_amount * coverage_ratio).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
             ineligible_portion = inv.invoice_amount - eligible_portion
 
             final_eligible.append(
@@ -135,9 +147,15 @@ def evaluate_snapshot(
                 )
             )
 
-    total_eligible = sum((inv.invoice_amount for inv in final_eligible), Decimal("0.00"))
-    total_ineligible = sum((rec.ineligible_balance for rec in ineligible_records), Decimal("0.00"))
-    net_borrow = calculate_net_availability(total_eligible, criteria.advance_rate, criteria.dilution_reserve_pct)
+    total_eligible = sum(
+        (inv.invoice_amount for inv in final_eligible), Decimal("0.00")
+    )
+    total_ineligible = sum(
+        (rec.ineligible_balance for rec in ineligible_records), Decimal("0.00")
+    )
+    net_borrow = calculate_net_availability(
+        total_eligible, criteria.advance_rate, criteria.dilution_reserve_pct
+    )
 
     return CollateralReport(
         week=week_dt,
