@@ -15,14 +15,18 @@ def is_invoice_open(inv: Invoice, as_of: date) -> bool:
     return True
 
 
-def check_contra(client_name: str, contra_clients: frozenset[str]) -> IneligibilityReason | None:
+def check_contra(
+    client_name: str, contra_clients: frozenset[str]
+) -> IneligibilityReason | None:
     """Identifies debtor accounts affiliated with self or intercompany accounts."""
     if client_name.strip().lower() in contra_clients:
         return IneligibilityReason.CONTRA_ACCOUNT
     return None
 
 
-def check_aged_overdue(due_date: date, as_of: date, max_days: int) -> IneligibilityReason | None:
+def check_aged_overdue(
+    due_date: date, as_of: date, max_days: int
+) -> IneligibilityReason | None:
     """Flags stale invoices exceeding the absolute overdue threshold."""
     if (as_of - due_date).days > max_days:
         return IneligibilityReason.AGED_OVERDUE
@@ -57,7 +61,9 @@ def find_tainted_clients(
     return tainted
 
 
-def check_cross_default(client_name: str, tainted_clients: set[str]) -> IneligibilityReason | None:
+def check_cross_default(
+    client_name: str, tainted_clients: set[str]
+) -> IneligibilityReason | None:
     """Checks if a client belongs to the tainted debtor registry."""
     if client_name in tainted_clients:
         return IneligibilityReason.CROSS_DEFAULT_TAINT
@@ -76,4 +82,6 @@ def calculate_net_availability(
 ) -> Decimal:
     """Applies advance rate net of dilution reserve to eligible collateral."""
     effective_rate = max(Decimal("0.00"), advance_rate - dilution_reserve)
-    return (eligible_cad * effective_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (eligible_cad * effective_rate).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )

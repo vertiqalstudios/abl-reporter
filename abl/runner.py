@@ -30,12 +30,14 @@ def run_collateral_report(
     while curr <= end_date:
         rpt = evaluate_snapshot(invoices, curr, criteria, fx)
         reports.append(rpt)
-        rows.append({
-            "week": pd.to_datetime(rpt.week),
-            "eligible_collateral": float(rpt.eligible_amount_cad),
-            "ineligible_collateral": float(rpt.ineligible_amount_cad),
-            "net_available_borrow": float(rpt.net_available_borrow_cad),
-        })
+        rows.append(
+            {
+                "week": pd.to_datetime(rpt.week),
+                "eligible_collateral": float(rpt.eligible_amount_cad),
+                "ineligible_collateral": float(rpt.ineligible_amount_cad),
+                "net_available_borrow": float(rpt.net_available_borrow_cad),
+            }
+        )
         curr += timedelta(days=7)
 
     df = pd.DataFrame(rows)

@@ -12,6 +12,7 @@ from abl.timeseries import (
     WeeklyDSOSnapshot,
     compute_weekly_snapshot,
     compute_weekly_dso,
+    get_top_n_customers,
 )
 
 
@@ -205,6 +206,34 @@ class TestTimeSeriesModule(unittest.TestCase):
                 as_of_date=date(2026, 1, 15),
                 currency="EUR",
             )
+
+    def test_get_top_n_customers(self) -> None:
+        invoices = (
+            _create_invoice(client_name="Client A", amount=Decimal("500.00")),
+            _create_invoice(client_name="Client B", amount=Decimal("300.00")),
+            _create_invoice(client_name="Client C", amount=Decimal("100.00")),
+            _create_invoice(client_name="Client D", amount=Decimal("50.00")),
+        )
+        
+        result = get_top_n_customers(
+            invoices=invoices,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            top_n=2,
+            currency="CAD"
+        )
+        
+        # Verify Top 2 clients are selected correctly
+        self.assertIn("Client A", result.top_n_names)
+        self.assertIn("Client B", result.top_n_names)
+        self.assertEqual(len(result.top_n_names), 2)
+        
+        # Verify exact balances are retained
+        self.assertEqual(result.top_n_balances["Client A"], Decimal("500.00"))
+        self.assertEqual(result.top_n_balances["Client B"], Decimal("300.00"))
+        
+        # Verify the sum of the remaining clients
+        self.assertEqual(result.other_balance, Decimal("150.00"))
 
 
 if __name__ == "__main__":
