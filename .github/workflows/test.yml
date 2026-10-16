@@ -23,8 +23,10 @@ jobs:
       - name: Set up Python 3.14
         run: uv python install 3.14
 
-      - name: Install dependencies
-        run: uv pip install --system -r requirements.txt
+      - name: Create virtual environment and install dependencies
+        run: |
+          uv venv --python 3.14
+          uv pip install -r requirements.txt
 
       - name: Run tests with pytest
-        run: pytest
+        run: uv run pytest
