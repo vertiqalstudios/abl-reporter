@@ -7,6 +7,7 @@ from .fx import FXProvider, convert_to_cad
 from .models import (
     CollateralReport,
     IneligibilityReason,
+    IneligibilitySummary,
     Invoice,
     InvoiceWithReason,
     LendingCriteria,
@@ -19,6 +20,7 @@ from .rules import (
     check_cross_default,
     find_tainted_clients,
     is_invoice_open,
+    summarize_ineligibles,
 )
 
 
@@ -42,6 +44,7 @@ def evaluate_snapshot(
             eligible_amount_cad=Decimal("0.00"),
             ineligible_amount_cad=Decimal("0.00"),
             net_available_borrow_cad=Decimal("0.00"),
+            ineligible_summary=IneligibilitySummary(),
         )
 
     # 1. Identify cross-default tainted debtors
@@ -147,6 +150,7 @@ def evaluate_snapshot(
                 )
             )
 
+    summary = summarize_ineligibles(ineligible_records)
     total_eligible = sum(
         (inv.invoice_amount for inv in final_eligible), Decimal("0.00")
     )
@@ -164,4 +168,5 @@ def evaluate_snapshot(
         net_available_borrow_cad=net_borrow,
         eligible_invoices=final_eligible,
         ineligible_invoices=ineligible_records,
+        ineligible_summary=summary,
     )

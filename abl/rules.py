@@ -3,7 +3,12 @@ from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
-from .models import IneligibilityReason, Invoice
+from .models import (
+    IneligibilityReason,
+    IneligibilitySummary,
+    Invoice,
+    InvoiceWithReason,
+)
 
 
 def is_invoice_open(inv: Invoice, as_of: date) -> bool:
@@ -84,4 +89,32 @@ def calculate_net_availability(
     effective_rate = max(Decimal("0.00"), advance_rate - dilution_reserve)
     return (eligible_cad * effective_rate).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+def summarize_ineligibles(
+    records: Sequence[InvoiceWithReason],
+) -> IneligibilitySummary:
+    """Aggregates disqualified invoice balances by ineligibility category."""
+    contra = Decimal("0.00")
+    aged = Decimal("0.00")
+    cross = Decimal("0.00")
+    conc = Decimal("0.00")
+
+    for rec in records:
+        match rec.reason:
+            case IneligibilityReason.CONTRA_ACCOUNT:
+                contra += rec.ineligible_balance
+            case IneligibilityReason.AGED_OVERDUE:
+                aged += rec.ineligible_balance
+            case IneligibilityReason.CROSS_DEFAULT_TAINT:
+                cross += rec.ineligible_balance
+            case IneligibilityReason.CONCENTRATION_EXCESS:
+                conc += rec.ineligible_balance
+
+    return IneligibilitySummary(
+        contra=contra,
+        aged_overdue=aged,
+        cross_default=cross,
+        concentration_excess=conc,
     )
