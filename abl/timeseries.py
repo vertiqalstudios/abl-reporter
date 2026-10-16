@@ -52,13 +52,15 @@ def _convert_currency(
     from_currency: str,
     to_currency: str,
     fx: FXProvider | None,
+    as_of: date,
 ) -> Decimal:
     if from_currency == to_currency:
         return amount
     if fx is None:
         raise ValueError(f"FXProvider required for conversion from {from_currency} to {to_currency}")
     if to_currency == "CAD":
-        return convert_to_cad(amount, from_currency, fx)
+        rate = fx(from_currency, "CAD", as_of)
+        return (amount * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     raise ValueError(f"Unsupported target currency: {to_currency}; expected CAD")
 
 
@@ -113,7 +115,7 @@ def _build_active_record(
     fx: FXProvider | None,
 ) -> _ActiveInvoiceRecord:
     raw_amount = _get_invoice_amount(inv)
-    converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx)
+    converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx, as_of)
     age_days = (as_of - inv.invoice_date).days
     dpd = _calculate_dpd(inv, as_of)
     bucket = _classify_aging_bucket(dpd)
@@ -157,13 +159,13 @@ def compute_weekly_snapshot(
 ) -> WeeklyDSOSnapshot:
     lookback_invoices = [inv for inv in invoices if _is_lookback_sale(inv, as_of_date, config.lookback_days)]
     lookback_sales = sum(
-        (_convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx) for inv in lookback_invoices),
+        (_convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx, as_of_date) for inv in lookback_invoices),
         start=Decimal("0"),
     )
 
     active_invoices = [inv for inv in invoices if _is_active_ar(inv, as_of_date)]
     all_active_amounts = [
-        _convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx)
+        _convert_currency(_get_invoice_amount(inv), inv.currency, currency, fx, as_of_date)
         for inv in active_invoices
     ]
     total_ar = sum(all_active_amounts, start=Decimal("0"))

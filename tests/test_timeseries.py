@@ -19,7 +19,7 @@ class MockFX:
     def __init__(self, rates: dict[tuple[str, str], Decimal] | None = None) -> None:
         self.rates = rates or {}
 
-    def get_rate(self, from_curr: str, to_curr: str) -> Decimal:
+    def get_rate(self, from_curr: str, to_curr: str, as_of: date | None = None) -> Decimal:
         return self.rates.get((from_curr, to_curr), Decimal("1.0"))
 
 
