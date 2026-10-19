@@ -429,11 +429,13 @@ def generate_customer_stream_chart(
 
 
 def main() -> None:
+    # file = "invoices.csv"
+    file = "invoices_real_1.csv"
     try:
-        with open("invoices.csv", "r", encoding="utf-8") as f:
+        with open(file, "r", encoding="utf-8") as f:
             invoices = load_invoices_from_csv(f)
     except FileNotFoundError:
-        print("Error: 'invoices_2.csv' not found in the current directory.")
+        print(f"Error: {file} not found in the current directory.")
         return
 
     if not invoices:

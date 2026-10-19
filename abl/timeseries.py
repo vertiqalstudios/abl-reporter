@@ -2,7 +2,15 @@ import pandas as pd
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from enum import StrEnum
+
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        pass
+
 
 from abl.fx import FXProvider
 from abl.models import Invoice
@@ -39,7 +47,7 @@ class WeeklyDSOSnapshot:
     bucket_90_plus: Decimal
 
 
-type WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
+WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
 
 _CENTS = Decimal("0.01")
 
