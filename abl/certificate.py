@@ -1,13 +1,11 @@
 """Borrowing Base Certificate PDF report generation using ReportLab."""
 
-import argparse
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 import os
 from pathlib import Path
-import sys
 import warnings
 
 warnings.filterwarnings(
@@ -22,7 +20,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .bbc import generate_bbc
 from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
+from .importer import load_invoices_from_csv
 from .models import (
     CertificateParams,
     CollateralReport,
@@ -31,6 +31,7 @@ from .models import (
     Invoice,
     LendingCriteria,
     ReportPalette,
+    ReportSettings,
     ReportStatus,
 )
 from .rules import is_invoice_open
@@ -999,161 +1000,68 @@ def generate_certificate_pdf(
     return path
 
 
-def main() -> None:
-    """CLI entrypoint for generating Borrowing Base Certificate PDF reports."""
-    from .bbc import generate_bbc
-    from .importer import load_invoices_from_csv
+def generate_certificate(
+    settings: ReportSettings | None = None,
+    invoices: Sequence[Invoice] | None = None,
+) -> Path:
+    """Evaluates collateral and generates the Borrowing Base Certificate PDF."""
+    cfg = settings if settings is not None else ReportSettings()
 
-    parser = argparse.ArgumentParser(
-        description="Generate Borrowing Base Certificate (BBC) PDF Report"
-    )
-    parser.add_argument(
-        "-i",
-        "--input",
-        dest="input_file",
-        default="invoices_real_1.csv",
-        help="Input invoice CSV file (default: invoices_real_1.csv)",
-    )
-    parser.add_argument(
-        "-d",
-        "--as-of",
-        dest="as_of_date",
-        default=None,
-        help="Snapshot as-of date (YYYY-MM-DD). Defaults to latest invoice date.",
-    )
-    parser.add_argument(
-        "-l",
-        "--facility-limit",
-        dest="facility_limit",
-        type=float,
-        default=2000000.0,
-        help="Credit facility limit in CAD (default: 2,000,000.00)",
-    )
-    parser.add_argument(
-        "-b",
-        "--existing-borrow",
-        dest="existing_borrow",
-        type=float,
-        default=0.0,
-        help="Current outstanding borrowed loan drawn in CAD (default: 0.00)",
-    )
-    parser.add_argument(
-        "-s",
-        "--status",
-        dest="status",
-        choices=["CERTIFIED", "DRAFT", "PRO_FORMA"],
-        default="CERTIFIED",
-        help="Certificate status: CERTIFIED, DRAFT, PRO_FORMA (default: CERTIFIED)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        dest="output_file",
-        default="bbc_certificate.pdf",
-        help="Output PDF path (default: bbc_certificate.pdf)",
-    )
-    parser.add_argument(
-        "-r",
-        "--fx-rate",
-        dest="fx_rate",
-        type=float,
-        default=1.40,
-        help="Fixed USD to CAD exchange rate (default: 1.40)",
-    )
-    parser.add_argument(
-        "-a",
-        "--advance-rate",
-        dest="advance_rate",
-        type=float,
-        default=0.85,
-        help="Contractual advance rate (default: 0.85)",
-    )
-    parser.add_argument(
-        "--dilution-rate",
-        dest="dilution_rate",
-        type=float,
-        default=0.05,
-        help="Dilution reserve rate (default: 0.05)",
-    )
-    parser.add_argument(
-        "--cap-pct",
-        dest="cap_pct",
-        type=float,
-        default=0.30,
-        help="Debtor concentration cap percentage (default: 0.30)",
-    )
-
-    args = parser.parse_args()
-
-    input_path = Path(args.input_file)
-    if not input_path.exists():
-        # Fallback to alternative sample if default isn't present
-        fallback = Path("invoices.csv")
-        if fallback.exists():
-            input_path = fallback
-        else:
-            print(f"Error: Input invoice file '{args.input_file}' not found.")
-            sys.exit(1)
-
-    with open(input_path, "r", encoding="utf-8") as f:
-        invoices = load_invoices_from_csv(f)
+    if invoices is None:
+        invoices = load_invoices_from_csv(cfg.input_source)
 
     if not invoices:
-        print(f"Error: No invoices found in '{input_path}'.")
-        sys.exit(1)
+        raise ValueError(
+            f"No invoices available to generate certificate from: {cfg.input_source}"
+        )
 
-    if args.as_of_date:
-        as_of = date.fromisoformat(args.as_of_date)
-    else:
-        as_of = max(inv.invoice_date for inv in invoices)
+    as_of = cfg.certificate.as_of or max(inv.invoice_date for inv in invoices)
+    fx = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
 
-    criteria = LendingCriteria(
-        advance_rate=Decimal(str(args.advance_rate)),
-        dilution_reserve_pct=Decimal(str(args.dilution_rate)),
-        max_client_concentration_pct=Decimal(str(args.cap_pct)),
+    params = (
+        cfg.certificate
+        if cfg.certificate.as_of is not None
+        else CertificateParams(
+            as_of=as_of,
+            status=cfg.certificate.status,
+            existing_borrow=cfg.certificate.existing_borrow,
+            facility_limit=cfg.certificate.facility_limit,
+            currency=cfg.certificate.currency,
+            disclaimer=cfg.certificate.disclaimer,
+            generated_at=cfg.certificate.generated_at,
+        )
     )
-    fx = make_fixed_fx_provider(usd_cad_rate=Decimal(str(args.fx_rate)))
 
-    report = generate_bbc(invoices, as_of, criteria, fx)
+    report = generate_bbc(invoices, as_of, cfg.criteria, fx)
     concentrations = calculate_debtor_concentrations(
-        invoices, as_of, fx, cap_pct=criteria.max_client_concentration_pct
+        invoices, as_of, fx, cap_pct=cfg.criteria.max_client_concentration_pct
     )
     currency_breakdowns = calculate_currency_breakdown(invoices, as_of, fx)
-
-    params = CertificateParams(
-        as_of=as_of,
-        status=ReportStatus[args.status],
-        existing_borrow=Decimal(str(args.existing_borrow)),
-        facility_limit=Decimal(str(args.facility_limit)),
-    )
 
     invoice_start = min(inv.invoice_date for inv in invoices)
     invoice_end = max(inv.invoice_date for inv in invoices)
 
-    pdf_out = generate_certificate_pdf(
+    output_dir = Path(cfg.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_file = output_dir / "bbc_certificate.pdf"
+
+    return generate_certificate_pdf(
         report=report,
-        criteria=criteria,
+        criteria=cfg.criteria,
         params=params,
         concentrations=concentrations,
         currency_breakdowns=currency_breakdowns,
         invoice_start=invoice_start,
         invoice_end=invoice_end,
-        output_path=args.output_file,
+        palette=cfg.palette,
+        output_path=output_file,
     )
 
-    print(f"Borrowing Base Certificate generated successfully: {pdf_out}")
-    print(f"  As of:                  {as_of.isoformat()}")
-    print(f"  Gross AR Balance:       ${report.gross_amount_cad:,.2f} CAD")
-    print(f"  Ineligible Deductions:  ${report.ineligible_amount_cad:,.2f} CAD")
-    print(f"  Net Eligible AR:        ${report.eligible_amount_cad:,.2f} CAD")
-    print(f"  Net Available Borrow:   ${report.net_available_borrow_cad:,.2f} CAD")
-    print(f"  Status:                 {params.status.value}")
-    if currency_breakdowns:
-        print("  Currency Breakdown:")
-        for cb in currency_breakdowns:
-            print(
-                f"    - {cb.currency}: Face ${cb.face_amount:,.2f} -> ${cb.cad_amount:,.2f} CAD ({cb.share_pct * 100:.1f}%)"
-            )
+
+def main() -> None:
+    """Executes Borrowing Base Certificate generation using default ReportSettings."""
+    pdf_out = generate_certificate()
+    print(f"Borrowing Base Certificate generated: {pdf_out}")
 
 
 if __name__ == "__main__":

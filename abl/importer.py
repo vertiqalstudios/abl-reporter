@@ -104,7 +104,9 @@ def _read_from_stream(stream: TextIO) -> list[Invoice]:
     return parse_invoices(reader)
 
 
-def load_invoices_from_csv(source: Path | str | TextIO) -> list[Invoice]:
+def load_invoices_from_csv(
+    source: Path | str | TextIO = Path("invoices.csv"),
+) -> list[Invoice]:
     """Loads and validates invoices from a CSV file path, buffer, or string."""
     if hasattr(source, "read"):
         return _read_from_stream(source)
@@ -122,8 +124,3 @@ def load_invoices_from_csv(source: Path | str | TextIO) -> list[Invoice]:
 
     raise FileNotFoundError(f"CSV file not found: {source}")
 
-
-if __name__ == "__main__":
-    # file = "invoices.csv"
-    file = "invoices_real_1.csv"
-    invoices = load_invoices_from_csv(file)

@@ -11,6 +11,7 @@ from .models import (
     InvoiceWithReason,
     LendingCriteria,
     ReportPalette,
+    ReportSettings,
     ReportStatus,
 )
 from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
@@ -22,7 +23,16 @@ from .bbc import generate_bbc
 from .certificate import (
     calculate_currency_breakdown,
     calculate_debtor_concentrations,
+    generate_certificate,
     generate_certificate_pdf,
+)
+from .report import (
+    generate_all_reports,
+    generate_collateral_chart,
+    generate_customer_ar_chart,
+    generate_customer_stream_chart,
+    generate_dso_chart,
+    generate_top_n_chart,
 )
 
 __all__ = [
@@ -36,6 +46,7 @@ __all__ = [
     "InvoiceWithReason",
     "LendingCriteria",
     "ReportPalette",
+    "ReportSettings",
     "ReportStatus",
     "FXProvider",
     "convert_to_cad",
@@ -49,5 +60,13 @@ __all__ = [
     "generate_bbc",
     "calculate_currency_breakdown",
     "calculate_debtor_concentrations",
+    "generate_certificate",
     "generate_certificate_pdf",
+    "generate_all_reports",
+    "generate_collateral_chart",
+    "generate_customer_ar_chart",
+    "generate_customer_stream_chart",
+    "generate_dso_chart",
+    "generate_top_n_chart",
 ]
+

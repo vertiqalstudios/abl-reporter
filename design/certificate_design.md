@@ -105,19 +105,38 @@ ABL portfolios frequently issue invoices in both Canadian Dollars (CAD) and Unit
 
 ## 5. Technical Specifications
 
-### 5.1 CLI Interface
-The certificate generator can be executed directly as a standalone Python module:
+### 5.1 Programmatic Interface & Execution
+The certificate generator is driven by an immutable `ReportSettings` contract and executed programmatically:
+```python
+from abl import ReportSettings, CertificateParams, generate_certificate
+
+# Standard execution with default settings
+pdf_path = generate_certificate()
+
+# Custom execution
+settings = ReportSettings(
+    input_source=Path("data/invoices.csv"),
+    output_dir=Path("output"),
+    certificate=CertificateParams(
+        as_of=date(2026, 2, 1),
+        facility_limit=Decimal("5000000.00"),
+        existing_borrow=Decimal("1250000.00"),
+        status=ReportStatus.CERTIFIED,
+    ),
+)
+pdf_path = generate_certificate(settings)
+```
+
+The module can also be invoked directly using defaults:
 ```bash
-python3 -m abl.certificate \
-  --input data/invoices.csv \
-  --as-of 2026-02-01 \
-  --facility-limit 5000000 \
-  --existing-borrow 1250000 \
-  --status CERTIFIED \
-  --output output/bbc_certificate.pdf
+python3 -m abl.certificate
 ```
 
 ### 5.2 Key Data Structures
+- `ReportSettings`: Unified root configuration encapsulating `criteria`, `palette`, `certificate`, `fx`, `input_source` (supporting `Path | str | TextIO`), and `output_dir`.
+- `LendingCriteria`: Authoritative covenant definitions (`advance_rate`, `dilution_reserve_pct`, `max_client_concentration_pct`, etc.).
+- `ReportPalette`: Unified visual tokens shared identically across matplotlib/seaborn charts and ReportLab PDF documents.
 - `CertificateParams`: Controls as-of date, run timestamp, facility limit, existing loan drawn, report status (`PRO_FORMA`, `DRAFT`, `CERTIFIED`), company name, and currency.
 - `CurrencyBreakdown`: Holds currency code, original face amount, exchange rate to CAD, converted CAD amount, and portfolio share.
 - `DebtorConcentration`: Holds client name, CAD balance, portfolio share %, and whether the balance breaches the contractual concentration threshold.
+

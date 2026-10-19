@@ -1,6 +1,9 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import TextIO
 
 try:
     from enum import StrEnum
@@ -117,12 +120,14 @@ class CurrencyBreakdown:
 @dataclass(frozen=True, slots=True)
 class ReportPalette:
     primary: str = "#0F172A"
+    secondary: str = "#334155"
     muted: str = "#64748B"
     subtle: str = "#94A3B8"
-    accent: str = "#0F766E"
-    alert: str = "#991B1B"
+    accent: str = "#2563EB"
+    alert: str = "#DC2626"
     border: str = "#E2E8F0"
     bg_subtle: str = "#F8FAFC"
+    font_family: str = "Helvetica Neue"
     debtor_colors: tuple[str, ...] = (
         "#1E293B",
         "#334155",
@@ -135,7 +140,7 @@ class ReportPalette:
 
 @dataclass(frozen=True, slots=True)
 class CertificateParams:
-    as_of: date
+    as_of: date | None = None
     status: ReportStatus = ReportStatus.PRO_FORMA
     existing_borrow: Decimal = Decimal("0.00")
     facility_limit: Decimal = Decimal("2000000.00")
@@ -145,3 +150,16 @@ class CertificateParams:
         "For Internal Use and Lender Use only"
     )
     generated_at: datetime = field(default_factory=datetime.now)
+
+
+type FXCallable = Callable[[str, str, date], Decimal]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportSettings:
+    criteria: LendingCriteria = field(default_factory=LendingCriteria)
+    palette: ReportPalette = field(default_factory=ReportPalette)
+    certificate: CertificateParams = field(default_factory=CertificateParams)
+    fx: FXCallable | None = None
+    input_source: Path | str | TextIO = Path("invoices.csv")
+    output_dir: Path = Path("output")
