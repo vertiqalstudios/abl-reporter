@@ -21,6 +21,7 @@ REQUIRED_HEADERS: tuple[str, ...] = (
 
 
 def _parse_amount(raw: str, line_num: int) -> Decimal:
+    """Parses sanitized monetary strings into Decimal, stripping formatting."""
     cleaned = raw.strip().replace("$", "").replace(",", "")
     if not cleaned:
         raise ValueError(f"Line {line_num}: 'Invoice Amount' cannot be empty")
@@ -31,6 +32,7 @@ def _parse_amount(raw: str, line_num: int) -> Decimal:
 
 
 def _parse_date(raw: str, field_name: str, line_num: int) -> date:
+    """Parses an ISO format date string (YYYY-MM-DD), rejecting empty or invalid values."""
     cleaned = raw.strip()
     if not cleaned:
         raise ValueError(f"Line {line_num}: '{field_name}' cannot be empty")
@@ -43,6 +45,7 @@ def _parse_date(raw: str, field_name: str, line_num: int) -> date:
 
 
 def _parse_optional_date(raw: str, field_name: str, line_num: int) -> date | None:
+    """Parses an optional ISO format date string, returning None when blank."""
     cleaned = raw.strip()
     if not cleaned:
         return None
@@ -52,6 +55,7 @@ def _parse_optional_date(raw: str, field_name: str, line_num: int) -> date | Non
         raise ValueError(
             f"Line {line_num}: invalid ISO date '{raw}' for '{field_name}'"
         ) from err
+
 
 
 def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
@@ -93,6 +97,7 @@ def parse_invoices(rows: Iterable[dict[str, str]]) -> list[Invoice]:
 
 
 def _read_from_stream(stream: TextIO) -> list[Invoice]:
+    """Reads a CSV text stream, validates required headers, and yields invoices."""
     reader = csv.DictReader(stream)
     if reader.fieldnames is None:
         return []
@@ -102,6 +107,7 @@ def _read_from_stream(stream: TextIO) -> list[Invoice]:
         raise KeyError(f"Missing required CSV column(s): {missing}")
 
     return parse_invoices(reader)
+
 
 
 def load_invoices_from_csv(
