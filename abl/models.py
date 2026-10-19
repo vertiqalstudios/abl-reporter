@@ -5,13 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TextIO
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
+from enum import StrEnum
 
 
 class IneligibilityReason(StrEnum):

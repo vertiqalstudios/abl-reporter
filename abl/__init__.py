@@ -1,4 +1,11 @@
-"""ABL Collateral Monitoring Library."""
+"""ABL Collateral Monitoring Library.
+
+Runtime Requirement: Python 3.14+ ONLY.
+This package strictly targets Python 3.14 or higher and utilizes native PEP 695
+type statements (`type X = ...`), `enum.StrEnum`, structural pattern matching,
+and modern generic syntax. Pre-3.14 compatibility shims or version-fallback
+workarounds must not be used or reintroduced.
+"""
 
 from .models import (
     CertificateParams,

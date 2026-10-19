@@ -3,14 +3,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
-
+from enum import StrEnum
 
 from abl.fx import FXProvider
 from abl.models import Invoice
@@ -47,9 +40,10 @@ class WeeklyDSOSnapshot:
     bucket_90_plus: Decimal
 
 
-WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
+type WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
 
 _CENTS = Decimal("0.01")
+
 
 
 def _get_invoice_amount(inv: Invoice) -> Decimal:

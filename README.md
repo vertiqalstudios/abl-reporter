@@ -3,7 +3,8 @@
 Asset-Backed Lending (ABL) collateral evaluation and borrowing base engine.
 
 ## Requirements
-Written for Python 3.14. May be backwards compatible, but honestly - doesn't need to be.
+**Python 3.14+ ONLY.**
+This project strictly requires Python 3.14 or higher and utilizes native PEP 695 type aliases (`type X = ...`), `enum.StrEnum`, structural pattern matching, and modern typing constructs. Backward compatibility shims and pre-3.14 version fallbacks are prohibited.
 
 ## License
 Copyright (c) 2026 Vertiqal Studios Corporation & Columbia Westminster Pte Ltd. All Rights Reserved.

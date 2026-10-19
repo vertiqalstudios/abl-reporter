@@ -127,12 +127,9 @@ def calculate_currency_breakdown(
             rate = Decimal("1.0000")
             cad_amt = face
         else:
-            rate = (
-                fx.get_rate(curr, "CAD", as_of)
-                if hasattr(fx, "get_rate")
-                else fx(curr, "CAD", as_of)
-            )
+            rate = fx(curr, "CAD", as_of)
             cad_amt = (face * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
         total_cad += cad_amt
         temp_results.append((curr, face, rate, cad_amt))
 
