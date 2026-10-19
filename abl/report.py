@@ -1,14 +1,17 @@
+from collections.abc import Sequence
+from datetime import date
+from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from datetime import date
 from scipy.interpolate import pchip_interpolate
 
 from abl.fx import make_fixed_fx_provider
 from abl.importer import load_invoices_from_csv
+from abl.models import Invoice, ReportPalette, ReportSettings
 from abl.runner import run_collateral_report
 from abl.timeseries import compute_weekly_dso, customer_ar_balances
 
@@ -40,9 +43,12 @@ def get_chart_year_label(dates: pd.Series) -> str:
 
 
 def generate_collateral_chart(
-    df: pd.DataFrame, output_path: str = "collateral_chart.png"
-) -> None:
-    sns.set_theme(style="white", palette="deep", rc={"font.family": "Helvetica Neue"})
+    df: pd.DataFrame,
+    output_path: Path | str = "collateral_chart.png",
+    palette: ReportPalette | None = None,
+) -> Path:
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
 
     expected_schema = [
         "week",
@@ -71,7 +77,7 @@ def generate_collateral_chart(
         eligible,
         width=width,
         label="Eligible Collateral",
-        color=sns.color_palette()[0],
+        color=theme.accent,
     )
     ax.bar(
         dates,
@@ -79,7 +85,7 @@ def generate_collateral_chart(
         bottom=eligible,
         width=width,
         label="Ineligible Collateral",
-        color=sns.color_palette()[1],
+        color=theme.alert,
     )
 
     avg_eligible = eligible.mean()
@@ -114,17 +120,25 @@ def generate_collateral_chart(
     ax.legend(loc="upper right")
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    return out
 
 
-def generate_dso_chart(dso_series: tuple, output_path: str = "dso_chart.png") -> None:
-    sns.set_theme(style="white", palette="deep", rc={"font.family": "Helvetica Neue"})
+def generate_dso_chart(
+    dso_series: tuple,
+    output_path: Path | str = "dso_chart.png",
+    palette: ReportPalette | None = None,
+) -> Path | None:
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
 
     df = pd.DataFrame(dso_series)
     if df.empty:
         print("No DSO data available to plot.")
-        return
+        return None
 
     dates = pd.to_datetime(df["as_of_date"])
     eq_dso = df["dso_equal_weight"].astype(float)
@@ -136,14 +150,14 @@ def generate_dso_chart(dso_series: tuple, output_path: str = "dso_chart.png") ->
         dates,
         eq_dso,
         label="Equal Weight DSO",
-        color=sns.color_palette()[0],
+        color=theme.primary,
         linewidth=2,
     )
     ax.plot(
         dates,
         dol_dso,
         label="Dollar Weight DSO",
-        color=sns.color_palette()[1],
+        color=theme.accent,
         linewidth=2,
     )
 
@@ -170,19 +184,26 @@ def generate_dso_chart(dso_series: tuple, output_path: str = "dso_chart.png") ->
     ax.legend(loc="upper right")
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    return out
 
 
 def generate_top_n_chart(
-    df: pd.DataFrame, top_n: int, output_path: str = "top_n_chart.png"
-) -> None:
-    sns.set_theme(style="white", palette="deep", rc={"font.family": "Helvetica Neue"})
+    df: pd.DataFrame,
+    top_n: int,
+    output_path: Path | str = "top_n_chart.png",
+    palette: ReportPalette | None = None,
+) -> Path | None:
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
 
     df_filtered = df[df["client_name"] != "NONE"].copy()
     if df_filtered.empty:
         print("No customer data available to plot Top N chart.")
-        return
+        return None
 
     top_label = f"Top {top_n} Customers"
     other_label = "Other Customers"
@@ -210,7 +231,7 @@ def generate_top_n_chart(
         flat_df[other_label],
         width=width,
         label=other_label,
-        color=sns.color_palette()[1],
+        color=theme.secondary,
     )
     ax.bar(
         dates,
@@ -218,7 +239,7 @@ def generate_top_n_chart(
         bottom=flat_df[other_label],
         width=width,
         label=top_label,
-        color=sns.color_palette()[0],
+        color=theme.accent,
     )
 
     year = get_chart_year_label(dates)
@@ -244,19 +265,25 @@ def generate_top_n_chart(
     ax.legend(loc="upper right")
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    return out
 
 
 def generate_customer_ar_chart(
-    df: pd.DataFrame, output_path: str = "customer_ar_chart.png"
-) -> None:
-    sns.set_theme(style="white", palette="deep", rc={"font.family": "Helvetica Neue"})
+    df: pd.DataFrame,
+    output_path: Path | str = "customer_ar_chart.png",
+    palette: ReportPalette | None = None,
+) -> Path | None:
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
 
     df_filtered = df[df["client_name"] != "NONE"]
     if df_filtered.empty:
         print("No customer data available to plot AR chart.")
-        return
+        return None
 
     pivot_df = df_filtered.pivot_table(
         index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
@@ -270,7 +297,11 @@ def generate_customer_ar_chart(
     width = max(1, diffs.min() * 0.8) if not diffs.empty else 5
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = sns.color_palette("tab20", len(client_cols))
+    colors = (
+        list(theme.debtor_colors[: len(client_cols)])
+        if len(client_cols) <= len(theme.debtor_colors)
+        else sns.color_palette("tab20", len(client_cols))
+    )
 
     bottom = pd.Series(0.0, index=flat_df.index)
     for i, col in enumerate(client_cols):
@@ -296,8 +327,11 @@ def generate_customer_ar_chart(
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(currency_formatter))
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    return out
 
 
 def _smooth_timeseries(
@@ -316,13 +350,16 @@ def _smooth_timeseries(
 
 
 def generate_customer_stream_chart(
-    df: pd.DataFrame, output_path: str = "customer_ar_stream_chart.png"
-) -> None:
-    sns.set_theme(style="white", palette="deep", rc={"font.family": "Helvetica Neue"})
+    df: pd.DataFrame,
+    output_path: Path | str = "customer_ar_stream_chart.png",
+    palette: ReportPalette | None = None,
+) -> Path | None:
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
 
     df_filtered = df[df["client_name"] != "NONE"]
     if df_filtered.empty:
-        return
+        return None
 
     pivot_df = df_filtered.pivot_table(
         index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
@@ -345,7 +382,11 @@ def generate_customer_stream_chart(
     x_dense, y_dense = _smooth_timeseries(dates, y_raw)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = sns.color_palette("tab20", len(center_ordered))
+    colors = (
+        list(theme.debtor_colors[: len(center_ordered)])
+        if len(center_ordered) <= len(theme.debtor_colors)
+        else sns.color_palette("tab20", len(center_ordered))
+    )
 
     ax.stackplot(
         x_dense,
@@ -424,41 +465,61 @@ def generate_customer_stream_chart(
         ax.spines[spine].set_visible(False)
 
     plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    return out
 
 
-def main() -> None:
-    # file = "invoices.csv"
-    file = "invoices_real_1.csv"
-    try:
-        with open(file, "r", encoding="utf-8") as f:
-            invoices = load_invoices_from_csv(f)
-    except FileNotFoundError:
-        print(f"Error: {file} not found in the current directory.")
-        return
+def generate_all_reports(
+    settings: ReportSettings | None = None,
+    invoices: Sequence[Invoice] | None = None,
+) -> dict[str, Path]:
+    """Generates all timeseries analytics and chart visualizations using ReportSettings."""
+    cfg = settings if settings is not None else ReportSettings()
+
+    if invoices is None:
+        invoices = load_invoices_from_csv(cfg.input_source)
 
     if not invoices:
-        return
+        return {}
 
     start_date = min(inv.invoice_date for inv in invoices)
     end_dates = [inv.invoice_date for inv in invoices]
     end_dates.extend([inv.paid_date for inv in invoices if inv.paid_date is not None])
     end_date = max(end_dates) if end_dates else date.today()
 
-    fx_provider = make_fixed_fx_provider()
+    fx_provider = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
+    out_dir = Path(cfg.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    generated: dict[str, Path] = {}
 
     reports, df = run_collateral_report(
-        invoices=invoices, start_date=start_date, end_date=end_date
+        invoices=invoices,
+        start_date=start_date,
+        end_date=end_date,
+        criteria=cfg.criteria,
+        fx=fx_provider,
     )
-    generate_collateral_chart(df)
-    print("Collateral chart generated.")
+    collat_path = generate_collateral_chart(
+        df,
+        output_path=out_dir / "collateral_chart.png",
+        palette=cfg.palette,
+    )
+    generated["collateral"] = collat_path
 
     dso_series = compute_weekly_dso(
         invoices=invoices, start_date=start_date, end_date=end_date, fx=fx_provider
     )
-    generate_dso_chart(dso_series)
-    print("DSO chart generated.")
+    dso_path = generate_dso_chart(
+        dso_series,
+        output_path=out_dir / "dso_chart.png",
+        palette=cfg.palette,
+    )
+    if dso_path:
+        generated["dso"] = dso_path
 
     top_n = 4
     ar_df = customer_ar_balances(
@@ -469,14 +530,39 @@ def main() -> None:
         top_n=top_n,
     )
 
-    generate_top_n_chart(ar_df, top_n)
-    print("Top N chart generated.")
+    top_n_path = generate_top_n_chart(
+        ar_df,
+        top_n,
+        output_path=out_dir / "top_n_chart.png",
+        palette=cfg.palette,
+    )
+    if top_n_path:
+        generated["top_n"] = top_n_path
 
-    generate_customer_ar_chart(ar_df)
-    print("Customer AR chart generated.")
+    ar_path = generate_customer_ar_chart(
+        ar_df,
+        output_path=out_dir / "customer_ar_chart.png",
+        palette=cfg.palette,
+    )
+    if ar_path:
+        generated["customer_ar"] = ar_path
 
-    generate_customer_stream_chart(ar_df)
-    print("Stream chart generated.")
+    stream_path = generate_customer_stream_chart(
+        ar_df,
+        output_path=out_dir / "customer_ar_stream_chart.png",
+        palette=cfg.palette,
+    )
+    if stream_path:
+        generated["stream"] = stream_path
+
+    return generated
+
+
+def main() -> None:
+    """Executes all chart report generation using default ReportSettings."""
+    outputs = generate_all_reports()
+    for name, path in outputs.items():
+        print(f"Report [{name}] saved to: {path}")
 
 
 if __name__ == "__main__":

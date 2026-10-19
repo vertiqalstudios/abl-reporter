@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from .models import Invoice
 
-FXProvider = Callable[[str, str, date], Decimal]
+type FXProvider = Callable[[str, str, date], Decimal]
 
 
 def make_fixed_fx_provider(usd_cad_rate: Decimal = Decimal("1.44")) -> FXProvider:

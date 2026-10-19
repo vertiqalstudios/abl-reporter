@@ -8,6 +8,7 @@ from abl.bbc import generate_bbc
 from abl.certificate import (
     calculate_currency_breakdown,
     calculate_debtor_concentrations,
+    generate_certificate,
     generate_certificate_pdf,
 )
 from abl.fx import make_fixed_fx_provider
@@ -17,6 +18,7 @@ from abl.models import (
     Invoice,
     LendingCriteria,
     ReportPalette,
+    ReportSettings,
     ReportStatus,
 )
 
@@ -192,3 +194,58 @@ def test_generate_certificate_pdf_custom_palette(
 
     assert result_path.exists()
     assert result_path.stat().st_size > 1000
+
+
+def test_report_settings_defaults() -> None:
+    settings = ReportSettings()
+    assert settings.criteria.advance_rate == Decimal("0.85")
+    assert settings.palette.font_family == "Helvetica Neue"
+    assert settings.certificate.status == ReportStatus.PRO_FORMA
+    assert settings.certificate.currency == "CAD"
+    assert settings.input_source == Path("invoices.csv")
+    assert settings.output_dir == Path("output")
+
+
+def test_generate_certificate_from_settings_with_textio(
+    tmp_path: Path, default_criteria, fixed_fx
+) -> None:
+    csv_stream = io.StringIO(
+        "Client Name,Invoice Date,Due Date,Invoice Amount,Currency,Invoice Paid Date\n"
+        "Alpha Corp,2026-01-10,2026-02-10,100000.00,CAD,\n"
+        "US Client Inc,2026-01-15,2026-02-15,50000.00,USD,\n"
+    )
+    settings = ReportSettings(
+        criteria=default_criteria,
+        fx=fixed_fx,
+        certificate=CertificateParams(
+            as_of=date(2026, 2, 1),
+            status=ReportStatus.CERTIFIED,
+        ),
+        input_source=csv_stream,
+        output_dir=tmp_path,
+    )
+
+    pdf_out = generate_certificate(settings)
+    assert pdf_out.exists()
+    assert pdf_out.parent == tmp_path
+    assert pdf_out.name == "bbc_certificate.pdf"
+    assert pdf_out.stat().st_size > 1000
+
+
+def test_generate_certificate_from_settings_with_invoices(
+    tmp_path: Path, sample_invoices, default_criteria, fixed_fx
+) -> None:
+    settings = ReportSettings(
+        criteria=default_criteria,
+        fx=fixed_fx,
+        certificate=CertificateParams(
+            as_of=date(2026, 2, 1),
+            status=ReportStatus.DRAFT,
+        ),
+        output_dir=tmp_path,
+    )
+
+    pdf_out = generate_certificate(settings, invoices=sample_invoices)
+    assert pdf_out.exists()
+    assert pdf_out.stat().st_size > 1000
+
