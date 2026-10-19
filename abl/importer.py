@@ -124,5 +124,6 @@ def load_invoices_from_csv(source: Path | str | TextIO) -> list[Invoice]:
 
 
 if __name__ == "__main__":
-    file = "invoices.csv"
+    # file = "invoices.csv"
+    file = "invoices_real_1.csv"
     invoices = load_invoices_from_csv(file)

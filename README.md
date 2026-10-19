@@ -9,8 +9,8 @@ Written for Python 3.14. May be backwards compatible, but honestly - doesn't nee
 Copyright (c) 2026 Vertiqal Studios Corporation & Columbia Westminster Pte Ltd. All Rights Reserved.
 
 ## Running Tests
-```bash
-python3 -m unittest discover -s tests
+```
+python3 -m pytest -vv tests
 ```
 
 ## Authorship
