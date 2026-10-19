@@ -3,14 +3,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-try:
-    from enum import StrEnum
-except ImportError:
-    from enum import Enum
-
-    class StrEnum(str, Enum):
-        pass
-
+from enum import StrEnum
 
 from abl.fx import FXProvider
 from abl.models import Invoice
@@ -47,9 +40,10 @@ class WeeklyDSOSnapshot:
     bucket_90_plus: Decimal
 
 
-WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
+type WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
 
 _CENTS = Decimal("0.01")
+
 
 
 def _get_invoice_amount(inv: Invoice) -> Decimal:
@@ -63,6 +57,7 @@ def _convert_currency(
     fx: FXProvider | None,
     as_of: date | None = None,
 ) -> Decimal:
+    """Converts a monetary amount to the target currency using the FX provider."""
     if from_currency == to_currency:
         return amount
     if fx is None:
@@ -77,6 +72,7 @@ def _convert_currency(
 
 
 def _is_active_ar(inv: Invoice, as_of: date) -> bool:
+    """Determines if an invoice is issued on or before as_of and uncollected."""
     if inv.invoice_date > as_of:
         return False
     if inv.paid_date is not None and inv.paid_date <= as_of:
@@ -85,6 +81,7 @@ def _is_active_ar(inv: Invoice, as_of: date) -> bool:
 
 
 def _is_lookback_sale(inv: Invoice, as_of: date, lookback_days: int) -> bool:
+    """Determines if an invoice falls within the rolling lookback sales window."""
     start_window = as_of - timedelta(days=lookback_days)
     if inv.invoice_date < start_window:
         return False
@@ -94,6 +91,7 @@ def _is_lookback_sale(inv: Invoice, as_of: date, lookback_days: int) -> bool:
 
 
 def _calculate_dpd(inv: Invoice, as_of: date) -> int:
+    """Computes days past due (DPD) relative to due date, floored at zero."""
     delta_days = (as_of - inv.due_date).days
     if delta_days <= 0:
         return 0
@@ -101,6 +99,7 @@ def _calculate_dpd(inv: Invoice, as_of: date) -> int:
 
 
 def _classify_aging_bucket(dpd: int) -> AgingBucket:
+    """Maps days past due (DPD) to discrete aging categorization buckets."""
     if dpd == 0:
         return AgingBucket.CURRENT
     if dpd <= 30:
@@ -126,6 +125,7 @@ def _build_active_record(
     currency: str,
     fx: FXProvider | None,
 ) -> _ActiveInvoiceRecord:
+    """Constructs a normalized active AR record with converted amount and aging metrics."""
     raw_amount = _get_invoice_amount(inv)
     converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx, as_of)
     age_days = (as_of - inv.invoice_date).days
@@ -145,7 +145,9 @@ def _empty_snapshot(
     lookback_sales: Decimal,
     total_ar: Decimal,
 ) -> WeeklyDSOSnapshot:
+    """Builds a zeroed-out snapshot preserving sales lookback and total AR."""
     return WeeklyDSOSnapshot(
+
         as_of_date=as_of_date,
         currency=currency,
         total_ar=total_ar.quantize(_CENTS, rounding=ROUND_HALF_UP),
@@ -169,7 +171,9 @@ def compute_weekly_snapshot(
     fx: FXProvider | None = None,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> WeeklyDSOSnapshot:
+    """Computes DSO and aging metrics for active AR at a snapshot date."""
     lookback_invoices = [
+
         inv
         for inv in invoices
         if _is_lookback_sale(inv, as_of_date, config.lookback_days)
@@ -299,7 +303,9 @@ def compute_weekly_dso(
     fx: FXProvider | None = None,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> WeeklyTimeSeries:
+    """Generates a weekly series of DSO snapshots across the date range."""
     if start_date > end_date:
+
         return ()
 
     step = timedelta(days=config.step_days)
@@ -381,8 +387,9 @@ def customer_ar_balances(
     top_n: int = 4,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> pd.DataFrame:
-
+    """Computes weekly client AR balances and tags whether each client is within Top N."""
     top_n_result = get_top_n_customers(
+
         invoices, start_date, end_date, top_n, currency, fx
     )
     top_n_clients = top_n_result.top_n_names

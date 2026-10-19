@@ -107,17 +107,15 @@ def calculate_currency_breakdown(
     as_of: date,
     fx: FXProvider,
 ) -> list[CurrencyBreakdown]:
-    """Calculates breakdown of open collateral grouped by original currency (USD / CAD)."""
+    """Aggregates uncollected invoice balances by transaction currency and computes CAD equivalent share."""
     open_invoices = [inv for inv in invoices if is_invoice_open(inv, as_of)]
     if not open_invoices:
         return []
 
-    # Group face amounts by currency
     currency_totals: dict[str, Decimal] = defaultdict(Decimal)
     for inv in open_invoices:
         currency_totals[inv.currency.upper()] += inv.invoice_amount
 
-    # Convert each currency to CAD at the snapshot date
     breakdowns: list[CurrencyBreakdown] = []
     total_cad = Decimal("0.00")
     temp_results: list[tuple[str, Decimal, Decimal, Decimal]] = []
@@ -127,12 +125,9 @@ def calculate_currency_breakdown(
             rate = Decimal("1.0000")
             cad_amt = face
         else:
-            rate = (
-                fx.get_rate(curr, "CAD", as_of)
-                if hasattr(fx, "get_rate")
-                else fx(curr, "CAD", as_of)
-            )
+            rate = fx(curr, "CAD", as_of)
             cad_amt = (face * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
         total_cad += cad_amt
         temp_results.append((curr, face, rate, cad_amt))
 
@@ -152,7 +147,6 @@ def calculate_currency_breakdown(
             )
         )
 
-    # Sort with CAD first, USD second, then remaining alphabetical
     def sort_key(b: CurrencyBreakdown) -> tuple[int, str]:
         if b.currency == "CAD":
             return (0, b.currency)
@@ -170,7 +164,7 @@ def calculate_debtor_concentrations(
     fx: FXProvider,
     cap_pct: Decimal = Decimal("0.30"),
 ) -> list[DebtorConcentration]:
-    """Pure pipeline calculating debtor open balances, portfolio shares, and cap breaches."""
+    """Calculates open AR balance and portfolio share per debtor, identifying concentration threshold breaches."""
     open_invoices = [
         convert_to_cad(inv, as_of, fx)
         for inv in invoices
@@ -217,7 +211,8 @@ def generate_certificate_pdf(
     palette: ReportPalette | None = None,
     output_path: str | Path = "bbc_certificate.pdf",
 ) -> Path:
-    """Generates a landscape single-page Borrowing Base Certificate PDF."""
+    """Builds a single-page landscape PDF certificate complying with Tufte financial layout standards."""
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
