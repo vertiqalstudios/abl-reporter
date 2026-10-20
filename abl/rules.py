@@ -38,6 +38,25 @@ def check_aged_overdue(
     return None
 
 
+def _client_exposure(
+    invoices: Sequence[Invoice],
+    as_of: date,
+    taint_days: int,
+    contra_clients: frozenset[str],
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    """Totals each non-contra debtor's balance and its amount past taint_days."""
+    client_totals: dict[str, Decimal] = defaultdict(Decimal)
+    client_overdue: dict[str, Decimal] = defaultdict(Decimal)
+
+    for inv in invoices:
+        if check_contra(inv.client_name, contra_clients) is not None:
+            continue
+        client_totals[inv.client_name] += inv.invoice_amount
+        if (as_of - inv.due_date).days > taint_days:
+            client_overdue[inv.client_name] += inv.invoice_amount
+    return client_totals, client_overdue
+
+
 def find_tainted_clients(
     invoices: Sequence[Invoice],
     as_of: date,
@@ -46,24 +65,14 @@ def find_tainted_clients(
     contra_clients: frozenset[str],
 ) -> set[str]:
     """Identifies debtors where delinquency ratio meets or exceeds threshold."""
-    client_totals: dict[str, Decimal] = defaultdict(Decimal)
-    client_overdue: dict[str, Decimal] = defaultdict(Decimal)
-
-    for inv in invoices:
-        if check_contra(inv.client_name, contra_clients) is not None:
-            continue
-        client_totals[inv.client_name] += inv.invoice_amount
-        days_overdue = (as_of - inv.due_date).days
-        if days_overdue > taint_days:
-            client_overdue[inv.client_name] += inv.invoice_amount
-
-    tainted: set[str] = set()
-    for client, total in client_totals.items():
-        if total <= Decimal("0.00"):
-            continue
-        if (client_overdue[client] / total) >= threshold_pct:
-            tainted.add(client)
-    return tainted
+    client_totals, client_overdue = _client_exposure(
+        invoices, as_of, taint_days, contra_clients
+    )
+    return {
+        client
+        for client, total in client_totals.items()
+        if total > Decimal("0.00") and client_overdue[client] / total >= threshold_pct
+    }
 
 
 def check_cross_default(

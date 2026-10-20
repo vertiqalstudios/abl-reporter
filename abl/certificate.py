@@ -3,12 +3,14 @@
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from reportlab.graphics.shapes import Drawing, Line, Rect, String
 from reportlab.lib import colors
+from reportlab.lib.colors import Color
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
@@ -222,6 +224,219 @@ def calculate_debtor_concentrations(
     return concentrations
 
 
+@dataclass(frozen=True, slots=True)
+class _Ink:
+    """Resolved fonts and colours shared by the certificate's vector drawings."""
+
+    font_reg: str
+    font_bold: str
+    primary: Color
+    muted: Color
+    alert: Color
+    border: Color
+    bg_subtle: Color
+
+
+def _waterfall_drawing(
+    steps: Sequence[tuple[str, float, str, Color]], max_scale: float, ink: _Ink
+) -> Drawing:
+    """Draws the capital availability step bars, scaled to max_scale."""
+    av_draw = Drawing(370, 70)
+    av_draw.add(
+        String(
+            0,
+            58,
+            "CAPITAL AVAILABILITY WATERFALL",
+            fontName=ink.font_bold,
+            fontSize=7,
+            fillColor=ink.primary,
+        )
+    )
+
+    y_av = 42
+    for title, val, txt, col in steps:
+        w = max(2, int((val / max_scale) * 215)) if val > 0 else 2
+        av_draw.add(
+            String(
+                0,
+                y_av + 1,
+                title,
+                fontName=ink.font_reg,
+                fontSize=6.5,
+                fillColor=ink.primary,
+            )
+        )
+        av_draw.add(Rect(115, y_av, w, 6.5, fillColor=col, strokeColor=None))
+        av_draw.add(
+            String(
+                115 + w + 5,
+                y_av + 1,
+                txt,
+                fontName=ink.font_bold,
+                fontSize=6.5,
+                fillColor=col,
+            )
+        )
+        y_av -= 13
+    return av_draw
+
+
+def _concentration_bar_drawing(
+    display_list: Sequence[DebtorConcentration],
+    cap_pct: Decimal,
+    debtor_hex_colors: Sequence[Color],
+    ink: _Ink,
+) -> Drawing:
+    """Draws the 100% stacked debtor share bar with the concentration cap marker."""
+    conc_bar_draw = Drawing(340, 40)
+    conc_bar_draw.add(
+        String(
+            0,
+            30,
+            "DEBTOR CONCENTRATION DISTRIBUTION (100% STACKED)",
+            fontName=ink.font_bold,
+            fontSize=6.5,
+            fillColor=ink.primary,
+        )
+    )
+
+    bar_w_total = 310
+    bar_x = 0
+    bar_y = 12
+    bar_h = 11
+
+    curr_x = bar_x
+    for i, item in enumerate(display_list):
+        pct = float(item.share_pct)
+        w_seg = max(1, int(pct * bar_w_total))
+        color_idx = min(i, len(debtor_hex_colors) - 1)
+        seg_color = debtor_hex_colors[color_idx]
+        conc_bar_draw.add(
+            Rect(
+                curr_x,
+                bar_y,
+                w_seg,
+                bar_h,
+                fillColor=seg_color,
+                strokeColor=colors.white,
+                strokeWidth=0.5,
+            )
+        )
+        if pct >= 0.12 and w_seg > 24:
+            conc_bar_draw.add(
+                String(
+                    curr_x + (w_seg / 2) - 6,
+                    bar_y + 3,
+                    f"{pct*100:.0f}%",
+                    fontName=ink.font_bold,
+                    fontSize=6,
+                    fillColor=colors.white,
+                )
+            )
+        curr_x += w_seg
+
+    # Cap Threshold Vertical Guideline
+    cap_ratio = float(cap_pct)
+    cap_x = bar_x + int(cap_ratio * bar_w_total)
+    conc_bar_draw.add(
+        Line(
+            cap_x,
+            bar_y - 3,
+            cap_x,
+            bar_y + bar_h + 3,
+            strokeColor=ink.alert,
+            strokeWidth=1.5,
+        )
+    )
+    conc_bar_draw.add(
+        String(
+            cap_x - 14,
+            bar_y - 10,
+            f"{cap_ratio*100:.0f}% Cap",
+            fontName=ink.font_bold,
+            fontSize=6,
+            fillColor=ink.alert,
+        )
+    )
+    conc_bar_draw.add(
+        String(
+            bar_w_total - 60,
+            bar_y - 10,
+            "100% Total AR",
+            fontName=ink.font_reg,
+            fontSize=6,
+            fillColor=ink.muted,
+        )
+    )
+    return conc_bar_draw
+
+
+def _ineligibility_drawing(
+    items: Sequence[tuple[str, float, Color]],
+    max_inelig: float,
+    gross_val: float,
+    ink: _Ink,
+) -> Drawing:
+    """Draws one bar per ineligibility reason, labelled with its share of gross AR."""
+    inelig_draw = Drawing(340, 58)
+    inelig_draw.add(
+        String(
+            0,
+            48,
+            "INELIGIBILITY BREAKDOWN BY REASON",
+            fontName=ink.font_bold,
+            fontSize=7,
+            fillColor=ink.primary,
+        )
+    )
+
+    y_in = 34
+    for name, val, bar_color in items:
+        w = max(2, int((val / max_inelig) * 110)) if val > 0 else 0
+        pct_of_gross = (val / gross_val * 100) if gross_val > 0 else 0.0
+        label_txt = (
+            f"${val/1e3:,.1f}K ({pct_of_gross:.1f}%)" if val > 0 else "$0.00 (0.0%)"
+        )
+
+        inelig_draw.add(
+            String(
+                0,
+                y_in + 1,
+                name,
+                fontName=ink.font_reg,
+                fontSize=6.5,
+                fillColor=ink.primary,
+            )
+        )
+        inelig_draw.add(
+            Rect(
+                135,
+                y_in,
+                110,
+                6,
+                fillColor=ink.bg_subtle,
+                strokeColor=ink.border,
+                strokeWidth=0.5,
+            )
+        )
+        if w > 0:
+            inelig_draw.add(
+                Rect(135, y_in, w, 6, fillColor=bar_color, strokeColor=None)
+            )
+        inelig_draw.add(
+            String(
+                135 + 110 + 5,
+                y_in + 1,
+                label_txt,
+                fontName=ink.font_bold if val > 0 else ink.font_reg,
+                fontSize=6,
+                fillColor=bar_color if val > 0 else ink.muted,
+            )
+        )
+        y_in -= 11
+    return inelig_draw
+
+
 def generate_certificate_pdf(
     report: CollateralReport,
     criteria: LendingCriteria,
@@ -249,6 +464,15 @@ def generate_certificate_pdf(
     c_border = colors.HexColor(theme.border)
     c_bg_subtle = colors.HexColor(theme.bg_subtle)
     debtor_hex_colors = [colors.HexColor(c) for c in theme.debtor_colors]
+    ink = _Ink(
+        font_reg=font_reg,
+        font_bold=font_bold,
+        primary=c_primary,
+        muted=c_muted,
+        alert=c_alert,
+        border=c_border,
+        bg_subtle=c_bg_subtle,
+    )
 
     doc = SimpleDocTemplate(
         str(path),
@@ -515,18 +739,6 @@ def generate_certificate_pdf(
     )
 
     # Availability Waterfall / Step Bar directly UNDER Ledger
-    av_draw = Drawing(370, 70)
-    av_draw.add(
-        String(
-            0,
-            58,
-            "CAPITAL AVAILABILITY WATERFALL",
-            fontName=font_bold,
-            fontSize=7,
-            fillColor=c_primary,
-        )
-    )
-
     gross_val = float(report.gross_amount_cad)
     elig_val = float(report.eligible_amount_cad)
     avail_val = float(report.net_available_borrow_cad)
@@ -555,31 +767,7 @@ def generate_certificate_pdf(
         ("Existing Drawn Loan", drawn_val, f"${drawn_val/1e3:,.1f}K", c_subtle),
     ]
 
-    y_av = 42
-    for title, val, txt, col in av_steps:
-        w = max(2, int((val / max_scale) * 215)) if val > 0 else 2
-        av_draw.add(
-            String(
-                0,
-                y_av + 1,
-                title,
-                fontName=font_reg,
-                fontSize=6.5,
-                fillColor=c_primary,
-            )
-        )
-        av_draw.add(Rect(115, y_av, w, 6.5, fillColor=col, strokeColor=None))
-        av_draw.add(
-            String(
-                115 + w + 5,
-                y_av + 1,
-                txt,
-                fontName=font_bold,
-                fontSize=6.5,
-                fillColor=col,
-            )
-        )
-        y_av -= 13
+    av_draw = _waterfall_drawing(av_steps, max_scale, ink)
 
     # 4. COLUMN 2:
     # 4A. ORIGINAL CURRENCY BREAKDOWN (USD / CAD)
@@ -691,100 +879,11 @@ def generate_certificate_pdf(
     )
 
     # Sorted Stacked 100% Horizontal Bar with Concentration Cap marker
-    conc_bar_draw = Drawing(340, 40)
-    conc_bar_draw.add(
-        String(
-            0,
-            30,
-            "DEBTOR CONCENTRATION DISTRIBUTION (100% STACKED)",
-            fontName=font_bold,
-            fontSize=6.5,
-            fillColor=c_primary,
-        )
-    )
-
-    bar_w_total = 310
-    bar_x = 0
-    bar_y = 12
-    bar_h = 11
-
-    curr_x = bar_x
-    for i, item in enumerate(display_list):
-        pct = float(item.share_pct)
-        w_seg = max(1, int(pct * bar_w_total))
-        color_idx = min(i, len(debtor_hex_colors) - 1)
-        seg_color = debtor_hex_colors[color_idx]
-        conc_bar_draw.add(
-            Rect(
-                curr_x,
-                bar_y,
-                w_seg,
-                bar_h,
-                fillColor=seg_color,
-                strokeColor=colors.white,
-                strokeWidth=0.5,
-            )
-        )
-        if pct >= 0.12 and w_seg > 24:
-            conc_bar_draw.add(
-                String(
-                    curr_x + (w_seg / 2) - 6,
-                    bar_y + 3,
-                    f"{pct*100:.0f}%",
-                    fontName=font_bold,
-                    fontSize=6,
-                    fillColor=colors.white,
-                )
-            )
-        curr_x += w_seg
-
-    # Cap Threshold Vertical Guideline
-    cap_ratio = float(criteria.max_client_concentration_pct)
-    cap_x = bar_x + int(cap_ratio * bar_w_total)
-    conc_bar_draw.add(
-        Line(
-            cap_x,
-            bar_y - 3,
-            cap_x,
-            bar_y + bar_h + 3,
-            strokeColor=c_alert,
-            strokeWidth=1.5,
-        )
-    )
-    conc_bar_draw.add(
-        String(
-            cap_x - 14,
-            bar_y - 10,
-            f"{cap_ratio*100:.0f}% Cap",
-            fontName=font_bold,
-            fontSize=6,
-            fillColor=c_alert,
-        )
-    )
-    conc_bar_draw.add(
-        String(
-            bar_w_total - 60,
-            bar_y - 10,
-            "100% Total AR",
-            fontName=font_reg,
-            fontSize=6,
-            fillColor=c_muted,
-        )
+    conc_bar_draw = _concentration_bar_drawing(
+        display_list, criteria.max_client_concentration_pct, debtor_hex_colors, ink
     )
 
     # Ineligibility Breakdown Bars
-    inelig_draw = Drawing(340, 58)
-    inelig_draw.add(
-        String(
-            0,
-            48,
-            "INELIGIBILITY BREAKDOWN BY REASON",
-            fontName=font_bold,
-            fontSize=7,
-            fillColor=c_primary,
-        )
-    )
-
     inelig_items = [
         (
             "Debtor Concentration Excess",
@@ -810,50 +909,7 @@ def generate_certificate_pdf(
     max_inelig = max(
         [val for _, val, _ in inelig_items] + [float(report.ineligible_amount_cad), 1.0]
     )
-    y_in = 34
-    for name, val, bar_color in inelig_items:
-        w = max(2, int((val / max_inelig) * 110)) if val > 0 else 0
-        pct_of_gross = (val / gross_val * 100) if gross_val > 0 else 0.0
-        label_txt = (
-            f"${val/1e3:,.1f}K ({pct_of_gross:.1f}%)" if val > 0 else "$0.00 (0.0%)"
-        )
-
-        inelig_draw.add(
-            String(
-                0,
-                y_in + 1,
-                name,
-                fontName=font_reg,
-                fontSize=6.5,
-                fillColor=c_primary,
-            )
-        )
-        inelig_draw.add(
-            Rect(
-                135,
-                y_in,
-                110,
-                6,
-                fillColor=c_bg_subtle,
-                strokeColor=c_border,
-                strokeWidth=0.5,
-            )
-        )
-        if w > 0:
-            inelig_draw.add(
-                Rect(135, y_in, w, 6, fillColor=bar_color, strokeColor=None)
-            )
-        inelig_draw.add(
-            String(
-                135 + 110 + 5,
-                y_in + 1,
-                label_txt,
-                fontName=font_bold if val > 0 else font_reg,
-                fontSize=6,
-                fillColor=bar_color if val > 0 else c_muted,
-            )
-        )
-        y_in -= 11
+    inelig_draw = _ineligibility_drawing(inelig_items, max_inelig, gross_val, ink)
 
     # Assemble 2 Main Columns
     col_left_flow = [
