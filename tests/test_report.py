@@ -10,6 +10,7 @@ from abl import ReportSettings, generate_all_reports, generate_report_pack
 from abl.models import CertificateParams
 from abl.report import _compact_currency, _customer_pivot
 
+AS_OF = date(2026, 5, 1)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 CHART_FILES = {
     "collateral": "collateral_chart.png",
@@ -50,6 +51,7 @@ def pack_outputs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     settings = ReportSettings(
         input_source=io.StringIO(_sample_csv()),
         output_dir=tmp_path_factory.mktemp("pack"),
+        as_of=AS_OF,
     )
     return generate_report_pack(settings)
 
@@ -78,6 +80,18 @@ def test_generate_all_reports_empty_invoices_writes_nothing(tmp_path: Path) -> N
     assert list(tmp_path.iterdir()) == []
 
 
+def test_generate_all_reports_rejects_as_of_before_first_invoice(
+    tmp_path: Path,
+) -> None:
+    settings = ReportSettings(
+        input_source=io.StringIO(_sample_csv(customers=2, weeks=3)),
+        output_dir=tmp_path,
+        as_of=date(2025, 12, 31),
+    )
+    with pytest.raises(ValueError, match="before the first invoice"):
+        generate_all_reports(settings)
+
+
 def test_certificate_is_reproducible_with_fixed_generated_at(tmp_path: Path) -> None:
     fixed = CertificateParams(generated_at=datetime(2026, 10, 20, 12, 0, 0))
     paths = [
@@ -86,12 +100,56 @@ def test_certificate_is_reproducible_with_fixed_generated_at(tmp_path: Path) -> 
                 input_source=io.StringIO(_sample_csv(customers=2, weeks=3)),
                 output_dir=tmp_path / name,
                 certificate=fixed,
+                as_of=AS_OF,
             )
         )["certificate"]
         for name in ("first", "second")
     ]
     first, second = (PDF_RUN_METADATA.sub(b"", p.read_bytes()) for p in paths)
     assert first == second
+
+
+FUTURE_AS_OF = date(2026, 2, 6)
+KNOWN_ROWS = (
+    "Alpha,2026-01-05,2026-02-04,10000.00,CAD,",
+    "Beta,2026-01-12,2026-02-11,20000.00,USD,",
+)
+# Same history plus data that did not exist yet at FUTURE_AS_OF.
+HINDSIGHT_ROWS = (
+    "Alpha,2026-01-05,2026-02-04,10000.00,CAD,2026-02-20",
+    "Beta,2026-01-12,2026-02-11,20000.00,USD,",
+    "Gamma,2026-02-13,2026-03-15,90000.00,CAD,",
+)
+
+
+@pytest.fixture(scope="module")
+def known_and_hindsight_packs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[dict[str, Path], dict[str, Path]]:
+    """Runs the pack on history as known at as_of, and with later data added."""
+    fixed = CertificateParams(generated_at=datetime(2026, 10, 20, 12, 0, 0))
+    packs = [
+        generate_report_pack(
+            ReportSettings(
+                input_source=io.StringIO("\n".join((CSV_HEADER, *rows))),
+                output_dir=tmp_path_factory.mktemp(name),
+                certificate=fixed,
+                as_of=FUTURE_AS_OF,
+            )
+        )
+        for name, rows in (("known", KNOWN_ROWS), ("hindsight", HINDSIGHT_ROWS))
+    ]
+    return packs[0], packs[1]
+
+
+@pytest.mark.parametrize("name", ["certificate", *CHART_FILES])
+def test_data_after_as_of_does_not_change_outputs(
+    known_and_hindsight_packs: tuple[dict[str, Path], dict[str, Path]], name: str
+) -> None:
+    known, hindsight = known_and_hindsight_packs
+    assert PDF_RUN_METADATA.sub(b"", known[name].read_bytes()) == PDF_RUN_METADATA.sub(
+        b"", hindsight[name].read_bytes()
+    )
 
 
 @pytest.mark.parametrize(

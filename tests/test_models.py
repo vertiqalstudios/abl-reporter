@@ -1,0 +1,30 @@
+from datetime import date
+
+import pytest
+
+from abl.models import ReportSettings, end_of_week
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 10, 19), date(2026, 10, 23)),  # Monday
+        (date(2026, 10, 20), date(2026, 10, 23)),  # Tuesday
+        (date(2026, 10, 23), date(2026, 10, 23)),  # Friday
+        (date(2026, 10, 24), date(2026, 10, 23)),  # Saturday
+        (date(2026, 10, 25), date(2026, 10, 23)),  # Sunday
+    ],
+)
+def test_end_of_week_is_friday_of_the_same_week(day: date, expected: date) -> None:
+    assert end_of_week(day) == expected
+
+
+def test_resolve_as_of_defaults_to_end_of_current_week() -> None:
+    assert ReportSettings().resolve_as_of(today=date(2026, 10, 20)) == date(
+        2026, 10, 23
+    )
+
+
+def test_resolve_as_of_prefers_explicit_date() -> None:
+    settings = ReportSettings(as_of=date(2026, 2, 1))
+    assert settings.resolve_as_of(today=date(2026, 10, 20)) == date(2026, 2, 1)

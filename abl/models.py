@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -133,7 +133,6 @@ class ReportPalette:
 
 @dataclass(frozen=True, slots=True)
 class CertificateParams:
-    as_of: date | None = None
     status: ReportStatus = ReportStatus.PRO_FORMA
     existing_borrow: Decimal = Decimal("0.00")
     facility_limit: Decimal = Decimal("2000000.00")
@@ -147,6 +146,13 @@ class CertificateParams:
 
 type FXCallable = Callable[[str, str, date], Decimal]
 
+SNAPSHOT_WEEKDAY = 4  # Friday: weekly snapshots and the default as-of land here
+
+
+def end_of_week(day: date) -> date:
+    """Returns the Friday of the Monday-to-Sunday week containing `day`."""
+    return day + timedelta(days=SNAPSHOT_WEEKDAY - day.weekday())
+
 
 @dataclass(frozen=True, slots=True)
 class ReportSettings:
@@ -156,3 +162,10 @@ class ReportSettings:
     fx: FXCallable | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")
+    as_of: date | None = None
+
+    def resolve_as_of(self, today: date | None = None) -> date:
+        """Returns the as-of date shared by the certificate and every chart."""
+        if self.as_of is not None:
+            return self.as_of
+        return end_of_week(today if today is not None else date.today())

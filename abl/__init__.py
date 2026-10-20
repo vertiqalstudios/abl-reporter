@@ -30,6 +30,7 @@ from .models import (
     ReportPalette,
     ReportSettings,
     ReportStatus,
+    end_of_week,
 )
 from .pack import generate_report_pack
 from .report import (
@@ -56,6 +57,7 @@ __all__ = [
     "ReportPalette",
     "ReportSettings",
     "ReportStatus",
+    "end_of_week",
     "FXProvider",
     "convert_to_cad",
     "make_fixed_fx_provider",
