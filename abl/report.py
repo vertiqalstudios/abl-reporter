@@ -43,6 +43,18 @@ def get_chart_year_label(dates: pd.Series) -> str:
     return f"{min_yr}–{max_yr}"
 
 
+def _compact_currency(x: float) -> str:
+    """Formats a dollar amount as $1.2M or $350K."""
+    if x >= 1e6:
+        return f"${x/1e6:,.1f}M"
+    return f"${x/1e3:,.0f}K"
+
+
+def _currency_tick(x: float, pos: int) -> str:
+    """Matplotlib tick formatter wrapping _compact_currency."""
+    return _compact_currency(x)
+
+
 def generate_collateral_chart(
     df: pd.DataFrame,
     output_path: Path | str = "collateral_chart.png",
@@ -112,12 +124,7 @@ def generate_collateral_chart(
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
-    def currency_formatter(x: float, pos: int) -> str:
-        if x >= 1e6:
-            return f"${x/1e6:,.1f}M"
-        return f"${x/1e3:,.0f}K"
-
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(currency_formatter))
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
     ax.legend(loc="upper right")
 
     plt.tight_layout()
@@ -215,9 +222,7 @@ def generate_top_n_chart(
     pivot_df = df_filtered.pivot_table(
         index="as_of_date", columns="category", values="balance", aggfunc="sum"
     ).fillna(0)
-    for cat in [top_label, other_label]:
-        if cat not in pivot_df.columns:
-            pivot_df[cat] = 0.0
+    pivot_df = pivot_df.reindex(columns=[top_label, other_label], fill_value=0.0)
 
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
@@ -257,12 +262,7 @@ def generate_top_n_chart(
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
-    def currency_formatter(x: float, pos: int) -> str:
-        if x >= 1e6:
-            return f"${x/1e6:,.1f}M"
-        return f"${x/1e3:,.0f}K"
-
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(currency_formatter))
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
     ax.legend(loc="upper right")
 
     plt.tight_layout()
@@ -320,12 +320,7 @@ def generate_customer_ar_chart(
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
-    def currency_formatter(x: float, pos: int) -> str:
-        if x >= 1e6:
-            return f"${x/1e6:,.1f}M"
-        return f"${x/1e3:,.0f}K"
-
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(currency_formatter))
+    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
 
     plt.tight_layout()
     out = Path(output_path)
@@ -364,13 +359,6 @@ def _scale_bar_value(max_vol: float) -> float:
     if ratio >= 2:
         return 2 * magnitude
     return magnitude
-
-
-def _compact_currency(x: float) -> str:
-    """Formats a dollar amount as $1.2M or $350K."""
-    if x >= 1e6:
-        return f"${x/1e6:,.1f}M"
-    return f"${x/1e3:,.0f}K"
 
 
 def generate_customer_stream_chart(
@@ -498,33 +486,16 @@ def generate_all_reports(
     out_dir = Path(cfg.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    generated: dict[str, Path] = {}
-
-    reports, df = run_collateral_report(
+    _, df = run_collateral_report(
         invoices=invoices,
         start_date=start_date,
         end_date=end_date,
         criteria=cfg.criteria,
         fx=fx_provider,
     )
-    collat_path = generate_collateral_chart(
-        df,
-        output_path=out_dir / "collateral_chart.png",
-        palette=cfg.palette,
-    )
-    generated["collateral"] = collat_path
-
     dso_series = compute_weekly_dso(
         invoices=invoices, start_date=start_date, end_date=end_date, fx=fx_provider
     )
-    dso_path = generate_dso_chart(
-        dso_series,
-        output_path=out_dir / "dso_chart.png",
-        palette=cfg.palette,
-    )
-    if dso_path:
-        generated["dso"] = dso_path
-
     top_n = 4
     ar_df = customer_ar_balances(
         invoices=invoices,
@@ -534,32 +505,26 @@ def generate_all_reports(
         top_n=top_n,
     )
 
-    top_n_path = generate_top_n_chart(
-        ar_df,
-        top_n,
-        output_path=out_dir / "top_n_chart.png",
-        palette=cfg.palette,
-    )
-    if top_n_path:
-        generated["top_n"] = top_n_path
-
-    ar_path = generate_customer_ar_chart(
-        ar_df,
-        output_path=out_dir / "customer_ar_chart.png",
-        palette=cfg.palette,
-    )
-    if ar_path:
-        generated["customer_ar"] = ar_path
-
-    stream_path = generate_customer_stream_chart(
-        ar_df,
-        output_path=out_dir / "customer_ar_stream_chart.png",
-        palette=cfg.palette,
-    )
-    if stream_path:
-        generated["stream"] = stream_path
-
-    return generated
+    charts: dict[str, Path | None] = {
+        "collateral": generate_collateral_chart(
+            df, output_path=out_dir / "collateral_chart.png", palette=cfg.palette
+        ),
+        "dso": generate_dso_chart(
+            dso_series, output_path=out_dir / "dso_chart.png", palette=cfg.palette
+        ),
+        "top_n": generate_top_n_chart(
+            ar_df, top_n, output_path=out_dir / "top_n_chart.png", palette=cfg.palette
+        ),
+        "customer_ar": generate_customer_ar_chart(
+            ar_df, output_path=out_dir / "customer_ar_chart.png", palette=cfg.palette
+        ),
+        "stream": generate_customer_stream_chart(
+            ar_df,
+            output_path=out_dir / "customer_ar_stream_chart.png",
+            palette=cfg.palette,
+        ),
+    }
+    return {name: path for name, path in charts.items() if path}
 
 
 def main() -> None:

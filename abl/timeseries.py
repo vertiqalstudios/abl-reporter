@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -375,6 +376,50 @@ def get_top_n_customers(
     )
 
 
+type ARRecord = dict[str, date | str | float | bool]
+
+
+def _week_balances(
+    invoices: Sequence[Invoice], as_of: date, currency: str, fx: FXProvider | None
+) -> dict[str, ClientVolume]:
+    """Sums each client's active AR at as_of, converted to currency."""
+    week_balances: dict[str, ClientVolume] = {}
+    for inv in invoices:
+        if not _is_active_ar(inv, as_of):
+            continue
+        amount = _convert_currency(
+            _get_invoice_amount(inv), inv.currency, currency, fx, as_of
+        )
+        week_balances.setdefault(
+            inv.client_name, ClientVolume(client_name=inv.client_name)
+        ).volume += amount
+    return week_balances
+
+
+def _week_records(
+    as_of: date, week_balances: dict[str, ClientVolume], top_n_clients: set[str]
+) -> list[ARRecord]:
+    """Flattens one week's balances into rows, or one null row when AR is empty."""
+    if not week_balances:
+        return [
+            {
+                "as_of_date": as_of,
+                "client_name": "NONE",
+                "balance": 0.0,
+                "is_top_n": False,
+            }
+        ]
+    return [
+        {
+            "as_of_date": as_of,
+            "client_name": client_name,
+            "balance": float(cv.volume),
+            "is_top_n": client_name in top_n_clients,
+        }
+        for client_name, cv in week_balances.items()
+    ]
+
+
 def customer_ar_balances(
     invoices: tuple[Invoice, ...],
     start_date: date,
@@ -392,43 +437,11 @@ def customer_ar_balances(
 
     step = timedelta(days=config.step_days)
     current_date = start_date
-    records = []
+    records: list[ARRecord] = []
 
     while current_date <= end_date:
-        active_invoices = [inv for inv in invoices if _is_active_ar(inv, current_date)]
-
-        week_balances: dict[str, ClientVolume] = {}
-        for inv in active_invoices:
-            amount = _convert_currency(
-                _get_invoice_amount(inv), inv.currency, currency, fx, current_date
-            )
-            if inv.client_name not in week_balances:
-                week_balances[inv.client_name] = ClientVolume(
-                    client_name=inv.client_name
-                )
-            week_balances[inv.client_name].volume += amount
-
-        if not week_balances:
-            # Preserve the date index with a null record when AR is empty
-            records.append(
-                {
-                    "as_of_date": current_date,
-                    "client_name": "NONE",
-                    "balance": 0.0,
-                    "is_top_n": False,
-                }
-            )
-        else:
-            for client_name, cv in week_balances.items():
-                records.append(
-                    {
-                        "as_of_date": current_date,
-                        "client_name": client_name,
-                        "balance": float(cv.volume),
-                        "is_top_n": client_name in top_n_clients,
-                    }
-                )
-
+        week_balances = _week_balances(invoices, current_date, currency, fx)
+        records.extend(_week_records(current_date, week_balances, top_n_clients))
         current_date += step
 
     return pd.DataFrame(records)
