@@ -31,6 +31,7 @@ from .models import (
     ReportSettings,
     ReportStatus,
 )
+from .pack import generate_report_pack
 from .report import (
     generate_all_reports,
     generate_collateral_chart,
@@ -70,6 +71,7 @@ __all__ = [
     "generate_certificate",
     "generate_certificate_pdf",
     "generate_all_reports",
+    "generate_report_pack",
     "generate_collateral_chart",
     "generate_customer_ar_chart",
     "generate_customer_stream_chart",

@@ -4,11 +4,15 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from reportlab.lib import colors
 
 from abl.bbc import generate_bbc
 from abl.certificate import (
+    _Ink,
+    _readable_label_color,
     calculate_currency_breakdown,
     calculate_debtor_concentrations,
+    capped_client_names,
     generate_certificate,
     generate_certificate_pdf,
 )
@@ -110,7 +114,10 @@ def test_calculate_debtor_concentrations_sorting_and_capping(
     sample_invoices, fixed_fx
 ) -> None:
     concentrations = calculate_debtor_concentrations(
-        sample_invoices, date(2026, 2, 1), fixed_fx, cap_pct=Decimal("0.30")
+        sample_invoices,
+        date(2026, 2, 1),
+        fixed_fx,
+        capped_clients=frozenset({"Alpha Corp"}),
     )
     assert len(concentrations) == 4
     assert concentrations[0].client_name == "Alpha Corp"
@@ -121,6 +128,75 @@ def test_calculate_debtor_concentrations_sorting_and_capping(
     assert concentrations[1].client_name == "Beta Ltd"
     assert concentrations[1].share_pct == Decimal("0.2500")
     assert concentrations[1].is_capped is False
+
+
+@pytest.fixture
+def capped_on_eligible_invoices():
+    """Two 25%-of-gross debtors that exceed 30% of the (smaller) eligible pool."""
+    return [
+        Invoice("A", date(2026, 1, 10), date(2026, 3, 1), Decimal("250.00"), "CAD"),
+        Invoice("B", date(2026, 1, 10), date(2026, 3, 1), Decimal("250.00"), "CAD"),
+        Invoice("C", date(2025, 1, 1), date(2025, 2, 1), Decimal("500.00"), "CAD"),
+    ]
+
+
+def test_capped_client_names_follow_engine_not_gross_share(
+    capped_on_eligible_invoices, fixed_fx, default_criteria
+) -> None:
+    """Regression: the cap applies to gross eligible, so 25% of gross AR can breach."""
+    as_of = date(2026, 2, 1)
+    report = generate_bbc(
+        capped_on_eligible_invoices, as_of, default_criteria, fixed_fx
+    )
+    assert capped_client_names(report) == frozenset({"A", "B"})
+
+    concentrations = calculate_debtor_concentrations(
+        capped_on_eligible_invoices,
+        as_of,
+        fixed_fx,
+        capped_clients=capped_client_names(report),
+    )
+    flags = {c.client_name: c.is_capped for c in concentrations}
+    assert flags == {"C": False, "A": True, "B": True}
+
+
+def test_currency_breakdown_total_matches_engine_gross_ar(
+    default_criteria,
+) -> None:
+    """Regression: per-invoice FX rounding must reconcile with the ledger."""
+    fx = make_fixed_fx_provider(usd_cad_rate=Decimal("1.44"))
+    invoices = [
+        Invoice("A", date(2026, 1, 10), date(2026, 3, 1), Decimal("1.01"), "USD"),
+        Invoice("A", date(2026, 1, 11), date(2026, 3, 1), Decimal("1.01"), "USD"),
+    ]
+    as_of = date(2026, 2, 1)
+    report = generate_bbc(invoices, as_of, default_criteria, fx)
+    breakdown_total = sum(
+        (b.cad_amount for b in calculate_currency_breakdown(invoices, as_of, fx)),
+        Decimal("0.00"),
+    )
+    assert breakdown_total == report.eligible_amount_cad + report.ineligible_amount_cad
+
+
+@pytest.mark.parametrize(
+    ("fill", "expected"),
+    [
+        (colors.Color(0.12, 0.16, 0.23), colors.white),
+        (colors.Color(0.80, 0.84, 0.88), colors.Color(0.06, 0.09, 0.16)),
+    ],
+)
+def test_readable_label_color_contrasts_with_fill(fill, expected) -> None:
+    """Regression: white '48%' on the light 'Other' segment was unreadable."""
+    ink = _Ink(
+        font_reg="Helvetica",
+        font_bold="Helvetica-Bold",
+        primary=colors.Color(0.06, 0.09, 0.16),
+        muted=colors.grey,
+        alert=colors.red,
+        border=colors.lightgrey,
+        bg_subtle=colors.whitesmoke,
+    )
+    assert _readable_label_color(fill, ink) == expected
 
 
 def test_calculate_currency_breakdown_empty(fixed_fx) -> None:
