@@ -13,8 +13,10 @@ from abl.certificate import (
     calculate_currency_breakdown,
     calculate_debtor_concentrations,
     capped_client_names,
+    format_deduction,
     generate_certificate,
     generate_certificate_pdf,
+    pre_cap_eligible_by_client,
 )
 from abl.fx import make_fixed_fx_provider
 from abl.models import (
@@ -387,3 +389,47 @@ def test_generate_certificate_rejects_as_of_before_every_invoice(
     settings = ReportSettings(output_dir=tmp_path, as_of=date(2000, 1, 1))
     with pytest.raises(ValueError, match="No invoices dated on or before"):
         generate_certificate(settings, invoices=sample_invoices)
+
+
+@pytest.mark.parametrize(
+    ("amount", "expected"),
+    [
+        (Decimal("0.00"), "$0.00"),
+        (Decimal("62850.39"), "($62,850.39)"),
+        (Decimal("1548452.60"), "($1,548,452.60)"),
+    ],
+)
+def test_format_deduction_uses_accounting_parentheses(
+    amount: Decimal, expected: str
+) -> None:
+    assert format_deduction(amount) == expected
+
+
+def test_eligible_share_uses_pre_cap_eligible_pool(
+    capped_on_eligible_invoices, fixed_fx, default_criteria
+) -> None:
+    """25% of gross AR is 50% of the eligible pool, which is why A and B breach."""
+    as_of = date(2026, 2, 1)
+    report = generate_bbc(
+        capped_on_eligible_invoices, as_of, default_criteria, fixed_fx
+    )
+    assert pre_cap_eligible_by_client(report) == {
+        "A": Decimal("250.00"),
+        "B": Decimal("250.00"),
+    }
+
+    concentrations = calculate_debtor_concentrations(
+        capped_on_eligible_invoices,
+        as_of,
+        fixed_fx,
+        capped_clients=capped_client_names(report),
+        eligible_balances=pre_cap_eligible_by_client(report),
+    )
+    shares = {
+        c.client_name: (c.share_pct, c.eligible_share_pct) for c in concentrations
+    }
+    assert shares == {
+        "C": (Decimal("0.5000"), Decimal("0.0000")),
+        "A": (Decimal("0.2500"), Decimal("0.5000")),
+        "B": (Decimal("0.2500"), Decimal("0.5000")),
+    }

@@ -2,7 +2,7 @@
 
 import warnings
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -157,6 +157,7 @@ def _display_concentrations(
         balance_cad=other_balance,
         share_pct=_share_of(other_balance, gross),
         is_capped=False,
+        eligible_share_pct=sum((d.eligible_share_pct for d in others), Decimal("0")),
     )
     return [*top, other_row]
 
@@ -186,6 +187,33 @@ def calculate_currency_breakdown(
     return sorted(breakdowns, key=_currency_sort_key)
 
 
+def format_deduction(amount: Decimal) -> str:
+    """Formats a ledger deduction in accounting style: `($1,234.00)`, or `$0.00`."""
+    if amount <= Decimal("0.00"):
+        return "$0.00"
+    return f"(${amount:,.2f})"
+
+
+def pre_cap_eligible_by_client(report: CollateralReport) -> dict[str, Decimal]:
+    """Returns each debtor's eligible balance before the concentration cap trimmed it.
+
+    This is the base the cap is measured against: kept balance plus cap excess.
+    """
+    balances: dict[str, Decimal] = defaultdict(Decimal)
+    for inv in report.eligible_invoices:
+        balances[inv.client_name] += inv.invoice_amount
+    for rec in report.ineligible_invoices:
+        if rec.reason == IneligibilityReason.CONCENTRATION_EXCESS:
+            balances[rec.client_name] += rec.ineligible_balance
+    return dict(balances)
+
+
+def _eligible_shares(balances: Mapping[str, Decimal]) -> dict[str, Decimal]:
+    """Returns each debtor's share of the pre-cap eligible pool."""
+    total = sum(balances.values(), Decimal("0.00"))
+    return {client: _share_of(amount, total) for client, amount in balances.items()}
+
+
 def capped_client_names(report: CollateralReport) -> frozenset[str]:
     """Returns debtors the engine trimmed for breaching the concentration cap."""
     return frozenset(
@@ -200,11 +228,13 @@ def calculate_debtor_concentrations(
     as_of: date,
     fx: FXProvider,
     capped_clients: frozenset[str] = frozenset(),
+    eligible_balances: Mapping[str, Decimal] | None = None,
 ) -> list[DebtorConcentration]:
     """Returns open CAD balance and share per debtor, flagging capped debtors.
 
     The cap applies to gross eligible collateral, not gross AR, so callers pass
-    the engine's capped debtors (`capped_client_names`) rather than a share test.
+    the engine's capped debtors (`capped_client_names`) rather than a share test,
+    and `pre_cap_eligible_by_client` to report each debtor's share of that pool.
     """
     open_invoices = [
         convert_to_cad(inv, as_of, fx)
@@ -223,6 +253,7 @@ def calculate_debtor_concentrations(
         return []
 
     sorted_clients = sorted(client_totals.items(), key=lambda kv: kv[1], reverse=True)
+    eligible_shares = _eligible_shares(eligible_balances or {})
 
     concentrations: list[DebtorConcentration] = []
     for client_name, balance in sorted_clients:
@@ -235,6 +266,7 @@ def calculate_debtor_concentrations(
                 balance_cad=balance,
                 share_pct=share,
                 is_capped=client_name in capped_clients,
+                eligible_share_pct=eligible_shares.get(client_name, Decimal("0.0000")),
             )
         )
     return concentrations
@@ -309,13 +341,13 @@ def _concentration_bar_drawing(
     debtor_hex_colors: Sequence[Color],
     ink: _Ink,
 ) -> Drawing:
-    """Draws the 100% stacked debtor share bar with the concentration cap marker."""
+    """Draws the 100% stacked eligible-share bar with the concentration cap marker."""
     conc_bar_draw = Drawing(340, 40)
     conc_bar_draw.add(
         String(
             0,
             30,
-            "DEBTOR CONCENTRATION DISTRIBUTION (100% STACKED)",
+            "DEBTOR CONCENTRATION (% OF GROSS ELIGIBLE, 100% STACKED)",
             fontName=ink.font_bold,
             fontSize=6.5,
             fillColor=ink.primary,
@@ -329,7 +361,7 @@ def _concentration_bar_drawing(
 
     curr_x = bar_x
     for i, item in enumerate(display_list):
-        pct = float(item.share_pct)
+        pct = float(item.eligible_share_pct)
         w_seg = max(1, int(pct * bar_w_total))
         color_idx = min(i, len(debtor_hex_colors) - 1)
         seg_color = debtor_hex_colors[color_idx]
@@ -384,7 +416,7 @@ def _concentration_bar_drawing(
         String(
             bar_w_total - 60,
             bar_y - 10,
-            "100% Total AR",
+            "100% Gross Eligible",
             fontName=ink.font_reg,
             fontSize=6,
             fillColor=ink.muted,
@@ -678,24 +710,24 @@ def generate_certificate_pdf(
         ],
         [
             Paragraph("&nbsp;&nbsp;&bull;&nbsp;Contra & Affiliate Accounts", s_body),
-            Paragraph(f"${report.ineligible_summary.contra:,.2f}", s_right),
+            Paragraph(format_deduction(report.ineligible_summary.contra), s_right),
         ],
         [
             Paragraph("&nbsp;&nbsp;&bull;&nbsp;Aged Past Due Over Limit", s_body),
-            Paragraph(f"${report.ineligible_summary.aged_overdue:,.2f}", s_right),
+            Paragraph(
+                format_deduction(report.ineligible_summary.aged_overdue), s_right
+            ),
         ],
         [
             Paragraph("&nbsp;&nbsp;&bull;&nbsp;Cross-Default Tainted Debtors", s_body),
-            Paragraph(f"${report.ineligible_summary.cross_default:,.2f}", s_right),
+            Paragraph(
+                format_deduction(report.ineligible_summary.cross_default), s_right
+            ),
         ],
         [
             Paragraph("&nbsp;&nbsp;&bull;&nbsp;Debtor Concentration Excess", s_body),
             Paragraph(
-                (
-                    f"(${report.ineligible_summary.concentration_excess:,.2f})"
-                    if report.ineligible_summary.concentration_excess > Decimal("0.00")
-                    else "$0.00"
-                ),
+                format_deduction(report.ineligible_summary.concentration_excess),
                 (
                     s_right_alert
                     if report.ineligible_summary.concentration_excess > Decimal("0.00")
@@ -706,11 +738,7 @@ def generate_certificate_pdf(
         [
             Paragraph("<b>Total Ineligible Collateral</b>", s_bold),
             Paragraph(
-                (
-                    f"<b>(${report.ineligible_amount_cad:,.2f})</b>"
-                    if report.ineligible_amount_cad > Decimal("0.00")
-                    else "<b>$0.00</b>"
-                ),
+                f"<b>{format_deduction(report.ineligible_amount_cad)}</b>",
                 (
                     s_right_alert
                     if report.ineligible_amount_cad > Decimal("0.00")
@@ -850,7 +878,8 @@ def generate_certificate_pdf(
         [
             Paragraph("<b>Debtor Name</b>", s_bold),
             Paragraph("<b>Balance (CAD)</b>", s_right_bold),
-            Paragraph("<b>Share</b>", s_right_bold),
+            Paragraph("<b>% AR</b>", s_right_bold),
+            Paragraph("<b>% Elig.</b>", s_right_bold),
             Paragraph("<b>Status</b>", s_right_bold),
         ]
     ]
@@ -860,8 +889,9 @@ def generate_certificate_pdf(
         [
             Paragraph(f"&bull;&nbsp;{item.client_name}", s_body),
             Paragraph(f"${item.balance_cad:,.0f}", s_right),
+            Paragraph(f"{item.share_pct * 100:.1f}%", s_right),
             Paragraph(
-                f"{item.share_pct * 100:.1f}%",
+                f"{item.eligible_share_pct * 100:.1f}%",
                 s_right_alert if item.is_capped else s_right,
             ),
             Paragraph(
@@ -881,11 +911,12 @@ def generate_certificate_pdf(
             Paragraph("<b>Total Pledged Portfolio</b>", s_bold),
             Paragraph(f"<b>${report.gross_amount_cad:,.0f}</b>", s_right_bold),
             Paragraph("<b>100.0%</b>", s_right_bold),
+            Paragraph("<b>100.0%</b>", s_right_bold),
             Paragraph(f"<b>{conc_cap_pct:.0f}% Cap</b>", s_right_bold),
         ]
     )
 
-    conc_table = Table(conc_rows, colWidths=[130, 80, 60, 70])
+    conc_table = Table(conc_rows, colWidths=[110, 75, 50, 55, 50])
     conc_table.setStyle(
         TableStyle(
             [
@@ -900,8 +931,16 @@ def generate_certificate_pdf(
     )
 
     # Sorted Stacked 100% Horizontal Bar with Concentration Cap marker
+    bar_list = _display_concentrations(
+        sorted(
+            (c for c in concentrations if c.eligible_share_pct > Decimal("0")),
+            key=lambda c: c.eligible_share_pct,
+            reverse=True,
+        ),
+        report.gross_amount_cad,
+    )
     conc_bar_draw = _concentration_bar_drawing(
-        display_list, criteria.max_client_concentration_pct, debtor_hex_colors, ink
+        bar_list, criteria.max_client_concentration_pct, debtor_hex_colors, ink
     )
 
     # Ineligibility Breakdown Bars
@@ -1095,7 +1134,11 @@ def generate_certificate(
 
     report = generate_bbc(invoices, as_of, cfg.criteria, fx)
     concentrations = calculate_debtor_concentrations(
-        invoices, as_of, fx, capped_clients=capped_client_names(report)
+        invoices,
+        as_of,
+        fx,
+        capped_clients=capped_client_names(report),
+        eligible_balances=pre_cap_eligible_by_client(report),
     )
     currency_breakdowns = calculate_currency_breakdown(invoices, as_of, fx)
 

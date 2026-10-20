@@ -99,6 +99,7 @@ class DebtorConcentration:
     balance_cad: Decimal
     share_pct: Decimal
     is_capped: bool
+    eligible_share_pct: Decimal = Decimal("0.0000")
 
 
 @dataclass(frozen=True, slots=True)
