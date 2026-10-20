@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
+
 import pandas as pd
-import pytest
 
 from abl.models import Invoice
 from abl.runner import run_collateral_report
@@ -9,7 +9,9 @@ from abl.runner import run_collateral_report
 
 def test_runner_dataframe_generation() -> None:
     invoices = [
-        Invoice(f"Client {c}", date(2025, 1, 1), date(2025, 1, 31), Decimal("2500"), "CAD")
+        Invoice(
+            f"Client {c}", date(2025, 1, 1), date(2025, 1, 31), Decimal("2500"), "CAD"
+        )
         for c in ("A", "B", "C", "D")
     ]
     reports, df = run_collateral_report(

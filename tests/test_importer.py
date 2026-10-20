@@ -1,6 +1,7 @@
+import io
 from datetime import date
 from decimal import Decimal
-import io
+
 import pytest
 
 from abl.importer import load_invoices_from_csv, parse_invoice_row
@@ -92,10 +93,12 @@ def test_parse_invoice_row_validation_errors(
 
 
 def test_load_invoices_from_csv_stream() -> None:
-    csv_content = """Client Name,Invoice Date,Due Date,Invoice Amount,Currency,Invoice Paid Date
-Alpha Inc,2025-01-10,2025-02-10,5000.00,USD,
+    csv_content = (
+        "Client Name,Invoice Date,Due Date,Invoice Amount,Currency,Invoice Paid Date\n"
+        """Alpha Inc,2025-01-10,2025-02-10,5000.00,USD,
 Beta Inc,2025-01-12,2025-02-12,12000.00,CAD,2025-02-01
 """
+    )
     invoices = load_invoices_from_csv(io.StringIO(csv_content))
     assert len(invoices) == 2
     assert invoices[0].client_name == "Alpha Inc"

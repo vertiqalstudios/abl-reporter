@@ -1,9 +1,9 @@
-import pandas as pd
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
-
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
+
+import pandas as pd
 
 from abl.fx import FXProvider
 from abl.models import Invoice
@@ -43,7 +43,6 @@ class WeeklyDSOSnapshot:
 type WeeklyTimeSeries = tuple[WeeklyDSOSnapshot, ...]
 
 _CENTS = Decimal("0.01")
-
 
 
 def _get_invoice_amount(inv: Invoice) -> Decimal:
@@ -125,7 +124,7 @@ def _build_active_record(
     currency: str,
     fx: FXProvider | None,
 ) -> _ActiveInvoiceRecord:
-    """Constructs a normalized active AR record with converted amount and aging metrics."""
+    """Builds a normalized active AR record with converted amount and aging."""
     raw_amount = _get_invoice_amount(inv)
     converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx, as_of)
     age_days = (as_of - inv.invoice_date).days
@@ -147,7 +146,6 @@ def _empty_snapshot(
 ) -> WeeklyDSOSnapshot:
     """Builds a zeroed-out snapshot preserving sales lookback and total AR."""
     return WeeklyDSOSnapshot(
-
         as_of_date=as_of_date,
         currency=currency,
         total_ar=total_ar.quantize(_CENTS, rounding=ROUND_HALF_UP),
@@ -173,7 +171,6 @@ def compute_weekly_snapshot(
 ) -> WeeklyDSOSnapshot:
     """Computes DSO and aging metrics for active AR at a snapshot date."""
     lookback_invoices = [
-
         inv
         for inv in invoices
         if _is_lookback_sale(inv, as_of_date, config.lookback_days)
@@ -387,9 +384,8 @@ def customer_ar_balances(
     top_n: int = 4,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> pd.DataFrame:
-    """Computes weekly client AR balances and tags whether each client is within Top N."""
+    """Computes weekly client AR balances, tagging clients within the Top N."""
     top_n_result = get_top_n_customers(
-
         invoices, start_date, end_date, top_n, currency, fx
     )
     top_n_clients = top_n_result.top_n_names

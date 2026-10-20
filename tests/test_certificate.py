@@ -1,7 +1,8 @@
+import io
 from datetime import date
 from decimal import Decimal
-import io
 from pathlib import Path
+
 import pytest
 
 from abl.bbc import generate_bbc
@@ -14,7 +15,6 @@ from abl.certificate import (
 from abl.fx import make_fixed_fx_provider
 from abl.models import (
     CertificateParams,
-    CurrencyBreakdown,
     Invoice,
     LendingCriteria,
     ReportPalette,
@@ -44,20 +44,60 @@ def default_criteria():
 @pytest.fixture
 def sample_invoices():
     return [
-        Invoice("Alpha Corp", date(2026, 1, 10), date(2026, 2, 10), Decimal("100000.00"), "CAD"),
-        Invoice("Beta Ltd", date(2026, 1, 15), date(2026, 2, 15), Decimal("50000.00"), "CAD"),
-        Invoice("Gamma LLC", date(2026, 1, 20), date(2026, 2, 20), Decimal("25000.00"), "CAD"),
-        Invoice("Delta Inc", date(2026, 1, 25), date(2026, 2, 25), Decimal("25000.00"), "CAD"),
+        Invoice(
+            "Alpha Corp",
+            date(2026, 1, 10),
+            date(2026, 2, 10),
+            Decimal("100000.00"),
+            "CAD",
+        ),
+        Invoice(
+            "Beta Ltd", date(2026, 1, 15), date(2026, 2, 15), Decimal("50000.00"), "CAD"
+        ),
+        Invoice(
+            "Gamma LLC",
+            date(2026, 1, 20),
+            date(2026, 2, 20),
+            Decimal("25000.00"),
+            "CAD",
+        ),
+        Invoice(
+            "Delta Inc",
+            date(2026, 1, 25),
+            date(2026, 2, 25),
+            Decimal("25000.00"),
+            "CAD",
+        ),
     ]
 
 
 @pytest.fixture
 def multi_currency_invoices():
     return [
-        Invoice("Alpha Corp", date(2026, 1, 10), date(2026, 2, 10), Decimal("100000.00"), "CAD"),
-        Invoice("US Client Inc", date(2026, 1, 15), date(2026, 2, 15), Decimal("50000.00"), "USD"),
-        Invoice("Beta Ltd", date(2026, 1, 18), date(2026, 2, 18), Decimal("25000.00"), "CAD"),
-        Invoice("US Tech LLC", date(2026, 1, 20), date(2026, 2, 20), Decimal("20000.00"), "USD"),
+        Invoice(
+            "Alpha Corp",
+            date(2026, 1, 10),
+            date(2026, 2, 10),
+            Decimal("100000.00"),
+            "CAD",
+        ),
+        Invoice(
+            "US Client Inc",
+            date(2026, 1, 15),
+            date(2026, 2, 15),
+            Decimal("50000.00"),
+            "USD",
+        ),
+        Invoice(
+            "Beta Ltd", date(2026, 1, 18), date(2026, 2, 18), Decimal("25000.00"), "CAD"
+        ),
+        Invoice(
+            "US Tech LLC",
+            date(2026, 1, 20),
+            date(2026, 2, 20),
+            Decimal("20000.00"),
+            "USD",
+        ),
     ]
 
 
@@ -66,7 +106,9 @@ def test_calculate_debtor_concentrations_empty(fixed_fx) -> None:
     assert concentrations == []
 
 
-def test_calculate_debtor_concentrations_sorting_and_capping(sample_invoices, fixed_fx) -> None:
+def test_calculate_debtor_concentrations_sorting_and_capping(
+    sample_invoices, fixed_fx
+) -> None:
     concentrations = calculate_debtor_concentrations(
         sample_invoices, date(2026, 2, 1), fixed_fx, cap_pct=Decimal("0.30")
     )
@@ -86,7 +128,9 @@ def test_calculate_currency_breakdown_empty(fixed_fx) -> None:
     assert breakdowns == []
 
 
-def test_calculate_currency_breakdown_multi_currency(multi_currency_invoices, fixed_fx) -> None:
+def test_calculate_currency_breakdown_multi_currency(
+    multi_currency_invoices, fixed_fx
+) -> None:
     # CAD: 100k + 25k = 125k face = 125k CAD
     # USD: 50k + 20k = 70k face * 1.40 = 98k CAD
     # Total Gross CAD = 223,000 CAD
@@ -108,14 +152,24 @@ def test_calculate_currency_breakdown_multi_currency(multi_currency_invoices, fi
     assert usd_entry.share_pct == Decimal("0.4395")
 
 
-@pytest.mark.parametrize("status", [ReportStatus.PRO_FORMA, ReportStatus.DRAFT, ReportStatus.CERTIFIED])
+@pytest.mark.parametrize(
+    "status", [ReportStatus.PRO_FORMA, ReportStatus.DRAFT, ReportStatus.CERTIFIED]
+)
 def test_generate_certificate_pdf_status_variants(
-    tmp_path: Path, multi_currency_invoices, default_criteria, fixed_fx, status: ReportStatus
+    tmp_path: Path,
+    multi_currency_invoices,
+    default_criteria,
+    fixed_fx,
+    status: ReportStatus,
 ) -> None:
     as_of = date(2026, 2, 1)
     report = generate_bbc(multi_currency_invoices, as_of, default_criteria, fixed_fx)
-    concentrations = calculate_debtor_concentrations(multi_currency_invoices, as_of, fixed_fx)
-    currency_breakdowns = calculate_currency_breakdown(multi_currency_invoices, as_of, fixed_fx)
+    concentrations = calculate_debtor_concentrations(
+        multi_currency_invoices, as_of, fixed_fx
+    )
+    currency_breakdowns = calculate_currency_breakdown(
+        multi_currency_invoices, as_of, fixed_fx
+    )
 
     params = CertificateParams(
         as_of=as_of,
@@ -143,7 +197,13 @@ def test_generate_certificate_pdf_debtor_rollup(
 ) -> None:
     # 8 distinct debtors - Top 5 should be preserved, rest rolled into Other Accounts
     invoices = [
-        Invoice(f"Client {i}", date(2026, 1, 10), date(2026, 2, 10), Decimal(f"{10000 * i}.00"), "CAD")
+        Invoice(
+            f"Client {i}",
+            date(2026, 1, 10),
+            date(2026, 2, 10),
+            Decimal(f"{10000 * i}.00"),
+            "CAD",
+        )
         for i in range(1, 9)
     ]
     as_of = date(2026, 2, 1)
@@ -248,4 +308,3 @@ def test_generate_certificate_from_settings_with_invoices(
     pdf_out = generate_certificate(settings, invoices=sample_invoices)
     assert pdf_out.exists()
     assert pdf_out.stat().st_size > 1000
-

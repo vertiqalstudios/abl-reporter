@@ -2,10 +2,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
-
-from enum import StrEnum
 
 
 class IneligibilityReason(StrEnum):

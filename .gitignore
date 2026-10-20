@@ -31,6 +31,11 @@ Thumbs.db
 *.svg
 *.pdf
 
+# Jupyter Notebooks
+.ipynb*
+.ipynb_checkpoints/
+*.ipynb
+
 # Raw data
 *.csv
 data/
