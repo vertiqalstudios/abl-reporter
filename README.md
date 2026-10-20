@@ -26,7 +26,9 @@ Invoice Paid Date`. There are no command-line flags; a missing CSV exits with a 
 One as-of date drives the certificate and every chart. It defaults to the **Friday of
 the current week** and is set with `ReportSettings(as_of=...)`. Anything after it is
 ignored: invoices dated later are left out, and a payment dated later still counts as
-unpaid. Charts run weekly (Fridays) from the first invoice up to the as-of date.
+unpaid. Charts run weekly (Fridays) over the `chart_weeks` (default 78, ~18 months)
+before the as-of date, or from the first invoice if the history is shorter. Invoices
+before the window still count, so DSO and taint rules see the full history.
 
 ### Custom settings
 Configure by building a `ReportSettings` object in your own script:
@@ -52,7 +54,9 @@ outputs = generate_report_pack(settings)  # {"certificate": ..., "collateral": .
 ```
 
 `ReportSettings` also takes `criteria` (`LendingCriteria`: advance rate, concentration
-cap, taint rules), `palette` and `fx` (defaults to a fixed 1 USD = 1.44 CAD). To print
+cap, taint rules), `palette`, `customer_palette` (`CustomerPalette`: chart colours for
+the largest customers by rank, separate from the certificate's `ReportPalette`) and `fx`
+(defaults to a fixed 1 USD = 1.44 CAD). To print
 the paths as the command does, pass the same object to `abl.__main__.main(settings)`.
 
 ## Running Tests

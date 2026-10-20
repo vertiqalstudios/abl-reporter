@@ -3,12 +3,27 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pytest
 
 from abl import ReportSettings, generate_all_reports, generate_report_pack
-from abl.models import CertificateParams
-from abl.report import _compact_currency, _customer_pivot
+from abl.fx import make_fixed_fx_provider
+from abl.importer import load_invoices_from_csv
+from abl.models import CertificateParams, CustomerPalette
+from abl.report import (
+    _OTHER_LABEL,
+    _chart_start,
+    _compact_currency,
+    _customer_colors,
+    _customer_pivot,
+    _row_major,
+    _stream_bounds,
+    _week_edges,
+    generate_dso_chart,
+)
+from abl.timeseries import compute_weekly_dso
 
 AS_OF = date(2026, 5, 1)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -187,3 +202,70 @@ def test_customer_pivot_has_no_other_bucket_when_all_customers_fit() -> None:
 
 def test_customer_pivot_ignores_placeholder_rows() -> None:
     assert _customer_pivot(_balances([("NONE", 0.0)]), max_named=5) is None
+
+
+@pytest.mark.parametrize(
+    ("first_invoice", "as_of", "weeks", "expected"),
+    [
+        # long history: the window reaches back `weeks` from a Friday as-of
+        (date(2024, 1, 3), date(2026, 10, 23), 78, date(2025, 4, 25)),
+        # short history: start at the first snapshot Friday on or after the data
+        (date(2025, 1, 1), date(2025, 6, 6), 78, date(2025, 1, 3)),
+        (date(2025, 1, 3), date(2025, 6, 6), 78, date(2025, 1, 3)),
+        (date(2025, 1, 4), date(2025, 6, 6), 78, date(2025, 1, 10)),
+    ],
+)
+def test_chart_start_snaps_window_to_snapshot_friday(
+    first_invoice: date, as_of: date, weeks: int, expected: date
+) -> None:
+    assert _chart_start(first_invoice, as_of, weeks) == expected
+
+
+@pytest.mark.parametrize(
+    ("count", "columns", "expected"),
+    [
+        (2, 2, [0, 1]),
+        (4, 4, [0, 1, 2, 3]),
+        # matplotlib fills columns of heights [2, 2, 1, 1] top to bottom
+        (6, 4, [0, 4, 1, 5, 2, 3]),
+        (5, 4, [0, 4, 1, 2, 3]),
+    ],
+)
+def test_row_major_makes_column_filled_legend_read_across(
+    count: int, columns: int, expected: list[int]
+) -> None:
+    assert _row_major(list(range(count)), columns) == expected
+
+
+def test_customer_colors_follow_rank_and_keep_other_grey() -> None:
+    slots = CustomerPalette(named=("#111111", "#222222", "#333333"), other="#eeeeee")
+    colors = _customer_colors(slots, ["Big", "Small", _OTHER_LABEL])
+    assert colors == {"Big": "#111111", "Small": "#222222", _OTHER_LABEL: "#eeeeee"}
+
+
+def test_stream_bounds_stack_symmetrically_about_zero() -> None:
+    layers = [pd.Series([1.0, 4.0]), pd.Series([3.0, 0.0])]
+    (low_a, high_a), (low_b, high_b) = _stream_bounds(layers)
+    np.testing.assert_allclose(low_a, [-2.0, -2.0])
+    np.testing.assert_allclose(high_a, low_b)
+    np.testing.assert_allclose(high_b, [2.0, 2.0])
+
+
+def test_week_edges_give_each_snapshot_a_whole_week() -> None:
+    dates = pd.to_datetime(pd.Series(["2026-01-02", "2026-01-09", "2026-01-16"]))
+    edges = _week_edges(dates)
+    np.testing.assert_allclose(np.diff(edges), [7.0, 7.0, 7.0])
+    assert edges[0] == pytest.approx(edges[1] - 7.0)
+
+
+def test_chart_style_does_not_leak_into_global_matplotlib(tmp_path: Path) -> None:
+    invoices = load_invoices_from_csv(io.StringIO(_sample_csv(customers=2, weeks=3)))
+    series = compute_weekly_dso(
+        tuple(invoices),
+        date(2026, 1, 9),
+        date(2026, 1, 30),
+        fx=make_fixed_fx_provider(),
+    )
+    before = dict(plt.rcParams)
+    generate_dso_chart(series, output_path=tmp_path / "dso.png")
+    assert dict(plt.rcParams) == before

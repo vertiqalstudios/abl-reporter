@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .models import (
     CertificateParams,
+    CustomerPalette,
     LendingCriteria,
     ReportPalette,
     ReportSettings,
@@ -58,6 +59,11 @@ if __name__ == "__main__":
                 "#94A3B8",
                 "#CBD5E1",
             ),
+            grid="#CBD5E1",
+        ),
+        customer_palette=CustomerPalette(
+            named=("#eb6834", "#1baf7a", "#9085e9", "#eda100", "#e87ba4"),
+            other="#DAD7D0",
         ),
         certificate=CertificateParams(
             status=ReportStatus.PRO_FORMA,
@@ -73,5 +79,6 @@ if __name__ == "__main__":
         input_source=Path("invoices_real_1.csv"),
         output_dir=Path("output"),
         as_of=None,
+        chart_weeks=78,  # ~18 months plotted; earlier invoices still feed DSO
     )
     main(default_settings)

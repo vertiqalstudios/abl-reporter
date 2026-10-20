@@ -1,6 +1,7 @@
 import math
-from collections.abc import Sequence
-from datetime import date
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from datetime import date, timedelta
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -8,14 +9,18 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from scipy.interpolate import pchip_interpolate
 
 from abl.fx import make_fixed_fx_provider
 from abl.importer import load_invoices_from_csv
-from abl.models import Invoice, ReportPalette, ReportSettings
+from abl.models import (
+    SNAPSHOT_WEEKDAY,
+    CustomerPalette,
+    Invoice,
+    ReportPalette,
+    ReportSettings,
+)
 from abl.runner import run_collateral_report
 from abl.timeseries import compute_weekly_dso, customer_ar_balances
 
@@ -23,6 +28,8 @@ _OTHER_LABEL = "Other customers"
 _LEGEND_COLUMNS = 4
 _LEGEND_ROW_MARGIN = 0.05
 _WEEK_TICK_FORMAT = "%b %Y"
+_GRID_WIDTH = 0.6
+_STREAM_GAP_WIDTH = 0.75
 
 
 def get_chart_year_label(dates: pd.Series) -> str:
@@ -65,11 +72,52 @@ def _currency_tick(x: float, pos: int) -> str:
     return _compact_currency(x)
 
 
-def _apply_theme(palette: ReportPalette | None) -> ReportPalette:
-    """Resolves the palette and installs the matching seaborn theme."""
+def _style_rc(theme: ReportPalette) -> dict[str, str | float | bool]:
+    """Matplotlib settings shared by every chart: a quiet frame and value grid."""
+    return {
+        "font.family": theme.font_family,
+        "font.size": 12,
+        "axes.titlesize": 12,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "legend.frameon": False,
+        "text.color": theme.primary,
+        "axes.labelcolor": theme.secondary,
+        "xtick.color": theme.secondary,
+        "ytick.color": theme.secondary,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "axes.edgecolor": theme.subtle,
+        "axes.linewidth": 0.8,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.spines.left": False,
+        "axes.grid": True,
+        "axes.grid.axis": "y",
+        "axes.axisbelow": True,
+        "grid.color": theme.grid,
+        "grid.linewidth": _GRID_WIDTH,
+        "xtick.bottom": False,
+        "ytick.left": False,
+        "lines.solid_capstyle": "round",
+        "patch.edgecolor": "white",
+        "patch.force_edgecolor": True,
+        "patch.linewidth": 1.0,
+    }
+
+
+@contextmanager
+def _chart_style(palette: ReportPalette | None) -> Iterator[ReportPalette]:
+    """Resolves the palette and scopes the report style to one chart.
+
+    Every public chart applies this, so a chart looks the same whichever entry
+    point draws it and never leaks matplotlib settings into the caller.
+    """
     theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
-    return theme
+    with plt.rc_context(_style_rc(theme)):
+        yield theme
 
 
 def _bar_width(dates: pd.Series) -> float:
@@ -101,15 +149,34 @@ def _week_formatter_until(x_max: float) -> ticker.FuncFormatter:
     return ticker.FuncFormatter(format_tick)
 
 
+def _row_major[T](items: Sequence[T], columns: int) -> list[T]:
+    """Reorders items so matplotlib's column-filled legend reads left to right."""
+    rows, wide_columns = divmod(len(items), columns)
+    heights = [rows + 1] * wide_columns + [rows] * (columns - wide_columns)
+    return [
+        items[row * columns + col]
+        for col, height in enumerate(heights)
+        for row in range(height)
+    ]
+
+
 def _legend_below(fig: Figure, ax: Axes, order: Sequence[str] | None = None) -> float:
-    """Places the legend under the plot and returns the bottom margin it needs."""
+    """Places the legend under the plot and returns the bottom margin it needs.
+
+    Entries read left to right in `order` (default: drawing order).
+    """
     handles, labels = ax.get_legend_handles_labels()
     if order is not None:
         lookup = dict(zip(labels, handles))
         labels = [name for name in order if name in lookup]
         handles = [lookup[name] for name in labels]
     columns = min(len(labels), _LEGEND_COLUMNS)
-    fig.legend(handles, labels, loc="lower center", ncol=columns, frameon=False)
+    fig.legend(
+        _row_major(handles, columns),
+        _row_major(labels, columns),
+        loc="lower center",
+        ncol=columns,
+    )
     return _LEGEND_ROW_MARGIN * math.ceil(len(labels) / columns)
 
 
@@ -145,11 +212,13 @@ def _customer_pivot(df: pd.DataFrame, max_named: int) -> pd.DataFrame | None:
     return grouped
 
 
-def _customer_colors(theme: ReportPalette, columns: Sequence[str]) -> dict[str, str]:
-    """Maps customers to palette shades, reserving the lightest for the bucket."""
+def _customer_colors(
+    customers: CustomerPalette, columns: Sequence[str]
+) -> dict[str, str]:
+    """Maps customers to palette slots by rank, with the bucket in its own grey."""
     named = [name for name in columns if name != _OTHER_LABEL]
-    colors = dict(zip(named, theme.debtor_colors[:-1]))
-    colors[_OTHER_LABEL] = theme.debtor_colors[-1]
+    colors = dict(zip(named, customers.named))
+    colors[_OTHER_LABEL] = customers.other
     return colors
 
 
@@ -159,8 +228,6 @@ def generate_collateral_chart(
     palette: ReportPalette | None = None,
 ) -> Path:
     """Charts weekly eligible vs ineligible collateral with the average eligible."""
-    theme = _apply_theme(palette)
-
     expected_schema = [
         "week",
         "eligible_collateral",
@@ -178,42 +245,45 @@ def generate_collateral_chart(
     eligible = df[elig_col].astype(float)
     ineligible = df[inelig_col].astype(float)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    width = _bar_width(dates)
+    with _chart_style(palette) as theme:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        width = _bar_width(dates)
 
-    ax.bar(
-        dates,
-        eligible,
-        width=width,
-        label="Eligible Collateral",
-        color=theme.accent,
-    )
-    ax.bar(
-        dates,
-        ineligible,
-        bottom=eligible,
-        width=width,
-        label="Ineligible Collateral",
-        color=theme.alert,
-    )
+        ax.bar(
+            dates,
+            eligible,
+            width=width,
+            label="Eligible Collateral",
+            color=theme.accent,
+        )
+        ax.bar(
+            dates,
+            ineligible,
+            bottom=eligible,
+            width=width,
+            label="Ineligible Collateral",
+            color=theme.alert,
+        )
 
-    avg_eligible = eligible.mean()
-    ax.axhline(
-        avg_eligible,
-        color="gray",
-        linestyle="--",
-        linewidth=1.5,
-        label=f"Avg eligible: ${avg_eligible/1e3:,.0f}K",
-    )
+        avg_eligible = eligible.mean()
+        avg_label = f"Avg eligible: ${avg_eligible/1e3:,.0f}K"
+        ax.axhline(
+            avg_eligible,
+            color="gray",
+            linestyle="--",
+            linewidth=1.5,
+            label=avg_label,
+        )
 
-    _set_title_and_xlabel(
-        ax, f"Vertiqal Collateral Eligibility {get_chart_year_label(dates)}"
-    )
-    ax.set_ylabel("Collateral Value CAD $", fontsize=11, labelpad=10)
-    _format_week_axis(ax)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
+        _set_title_and_xlabel(
+            ax, f"Vertiqal Collateral Eligibility {get_chart_year_label(dates)}"
+        )
+        ax.set_ylabel("Collateral Value CAD $", fontsize=11, labelpad=10)
+        _format_week_axis(ax)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
 
-    return _save_figure(fig, output_path, _legend_below(fig, ax))
+        order = ["Eligible Collateral", "Ineligible Collateral", avg_label]
+        return _save_figure(fig, output_path, _legend_below(fig, ax, order=order))
 
 
 def generate_dso_chart(
@@ -222,8 +292,6 @@ def generate_dso_chart(
     palette: ReportPalette | None = None,
 ) -> Path | None:
     """Charts weekly equal- and dollar-weighted DSO with the equal-weight average."""
-    theme = _apply_theme(palette)
-
     df = pd.DataFrame(dso_series)
     if df.empty:
         print("No DSO data available to plot.")
@@ -233,38 +301,39 @@ def generate_dso_chart(
     eq_dso = df["dso_equal_weight"].astype(float)
     dol_dso = df["dso_dollar_weight"].astype(float)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    with _chart_style(palette) as theme:
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.plot(
-        dates,
-        eq_dso,
-        label="Equal Weight DSO",
-        color=theme.primary,
-        linewidth=2,
-    )
-    ax.plot(
-        dates,
-        dol_dso,
-        label="Dollar Weight DSO",
-        color=theme.accent,
-        linewidth=2,
-    )
-
-    avg_eq_dso = eq_dso.mean()
-    if pd.notna(avg_eq_dso):
-        ax.axhline(
-            avg_eq_dso,
-            color="gray",
-            linestyle="--",
-            linewidth=1.5,
-            label=f"Avg Eq DSO: {avg_eq_dso:.0f} days",
+        ax.plot(
+            dates,
+            eq_dso,
+            label="Equal Weight DSO",
+            color=theme.primary,
+            linewidth=2,
+        )
+        ax.plot(
+            dates,
+            dol_dso,
+            label="Dollar Weight DSO",
+            color=theme.accent,
+            linewidth=2,
         )
 
-    _set_title_and_xlabel(ax, f"Vertiqal DSO Trends {get_chart_year_label(dates)}")
-    ax.set_ylabel("Days Sales Outstanding", fontsize=11, labelpad=10)
-    _format_week_axis(ax)
+        avg_eq_dso = eq_dso.mean()
+        if pd.notna(avg_eq_dso):
+            ax.axhline(
+                avg_eq_dso,
+                color="gray",
+                linestyle="--",
+                linewidth=1.5,
+                label=f"Avg Eq DSO: {avg_eq_dso:.0f} days",
+            )
 
-    return _save_figure(fig, output_path, _legend_below(fig, ax))
+        _set_title_and_xlabel(ax, f"Vertiqal DSO Trends {get_chart_year_label(dates)}")
+        ax.set_ylabel("Days Sales Outstanding", fontsize=11, labelpad=10)
+        _format_week_axis(ax)
+
+        return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def generate_top_n_chart(
@@ -274,8 +343,6 @@ def generate_top_n_chart(
     palette: ReportPalette | None = None,
 ) -> Path | None:
     """Charts weekly open AR split between the top N customers and the rest."""
-    theme = _apply_theme(palette)
-
     df_filtered = df[df["client_name"] != "NONE"].copy()
     if df_filtered.empty:
         print("No customer data available to plot Top N chart.")
@@ -296,89 +363,99 @@ def generate_top_n_chart(
     dates = pd.to_datetime(flat_df["as_of_date"])
     width = _bar_width(dates)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    with _chart_style(palette) as theme:
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.bar(
-        dates,
-        flat_df[other_label],
-        width=width,
-        label=other_label,
-        color=theme.secondary,
-    )
-    ax.bar(
-        dates,
-        flat_df[top_label],
-        bottom=flat_df[other_label],
-        width=width,
-        label=top_label,
-        color=theme.accent,
-    )
+        ax.bar(
+            dates,
+            flat_df[other_label],
+            width=width,
+            label=other_label,
+            color=theme.secondary,
+        )
+        ax.bar(
+            dates,
+            flat_df[top_label],
+            bottom=flat_df[other_label],
+            width=width,
+            label=top_label,
+            color=theme.accent,
+        )
 
-    _set_title_and_xlabel(
-        ax, f"Vertiqal Top Customers Concentration {get_chart_year_label(dates)}"
-    )
-    ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
-    _format_week_axis(ax)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
+        _set_title_and_xlabel(
+            ax,
+            f"Vertiqal Open AR: Top {top_n} vs Other Customers "
+            f"{get_chart_year_label(dates)}",
+        )
+        ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
+        _format_week_axis(ax)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
 
-    return _save_figure(fig, output_path, _legend_below(fig, ax))
+        return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def generate_customer_ar_chart(
     df: pd.DataFrame,
     output_path: Path | str = "customer_ar_chart.png",
     palette: ReportPalette | None = None,
+    customers: CustomerPalette | None = None,
 ) -> Path | None:
     """Charts weekly open AR stacked by customer, smallest folded into 'Other'."""
-    theme = _apply_theme(palette)
-
-    pivot_df = _customer_pivot(df, max_named=len(theme.debtor_colors) - 1)
+    slots = customers if customers is not None else CustomerPalette()
+    pivot_df = _customer_pivot(df, max_named=len(slots.named))
     if pivot_df is None:
         print("No customer data available to plot AR chart.")
         return None
 
-    colors = _customer_colors(theme, list(pivot_df.columns))
+    colors = _customer_colors(slots, list(pivot_df.columns))
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
     width = _bar_width(dates)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    with _chart_style(palette):
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-    bottom = pd.Series(0.0, index=flat_df.index)
-    for col in pivot_df.columns:
-        ax.bar(
-            dates,
-            flat_df[col],
-            bottom=bottom,
-            width=width,
-            color=colors[col],
-            label=col,
+        bottom = pd.Series(0.0, index=flat_df.index)
+        for col in pivot_df.columns:
+            ax.bar(
+                dates,
+                flat_df[col],
+                bottom=bottom,
+                width=width,
+                color=colors[col],
+                label=col,
+            )
+            bottom += flat_df[col]
+
+        _set_title_and_xlabel(
+            ax, f"Vertiqal Open AR by Customer {get_chart_year_label(dates)}"
         )
-        bottom += flat_df[col]
+        ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
+        _format_week_axis(ax)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
 
-    _set_title_and_xlabel(
-        ax, f"Vertiqal Open AR by Customer {get_chart_year_label(dates)}"
-    )
-    ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
-    _format_week_axis(ax)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
-
-    return _save_figure(fig, output_path, _legend_below(fig, ax))
+        return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
-def _smooth_timeseries(
-    dates: pd.Series, y_data: list[pd.Series], points: int = 300
-) -> tuple[np.ndarray, list[np.ndarray]]:
+def _week_edges(dates: pd.Series) -> np.ndarray:
+    """Returns the boundaries of the week centred on each snapshot date."""
     x_num = mdates.date2num(dates)
-    x_dense = np.linspace(x_num.min(), x_num.max(), points)
+    step = np.diff(x_num).min() if len(x_num) > 1 else 7.0
+    return np.append(x_num - step / 2, x_num[-1] + step / 2)
 
-    y_dense = []
-    for y in y_data:
-        # PCHIP is shape-preserving; prevents splines from dipping below 0
-        y_interp = np.clip(pchip_interpolate(x_num, y, x_dense), 0, None)
-        y_dense.append(y_interp)
 
-    return x_dense, y_dense
+def _stream_bounds(
+    layers: Sequence[pd.Series],
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Stacks layers symmetrically about zero, returning each (lower, upper)."""
+    stacked = np.vstack([np.asarray(layer, dtype=float) for layer in layers])
+    tops = np.cumsum(stacked, axis=0) - stacked.sum(axis=0) / 2
+    return list(zip(tops - stacked, tops))
+
+
+def _hold_last(values: np.ndarray) -> np.ndarray:
+    """Repeats the final value so a post-step fill spans the last week too."""
+    return np.append(values, values[-1])
 
 
 def _center_out_order(keys: Sequence[str]) -> list[str]:
@@ -401,89 +478,99 @@ def generate_customer_stream_chart(
     df: pd.DataFrame,
     output_path: Path | str = "customer_ar_stream_chart.png",
     palette: ReportPalette | None = None,
+    customers: CustomerPalette | None = None,
 ) -> Path | None:
-    """Draws a smoothed stream of open AR by customer with a vertical scale bar."""
-    theme = _apply_theme(palette)
-
-    pivot_df = _customer_pivot(df, max_named=len(theme.debtor_colors) - 1)
+    """Draws open AR by customer as a weekly stream with a vertical scale bar."""
+    slots = customers if customers is not None else CustomerPalette()
+    pivot_df = _customer_pivot(df, max_named=len(slots.named))
     if pivot_df is None:
         return None
 
     ranked = list(pivot_df.columns)
     center_ordered = _center_out_order(ranked)
-    colors = _customer_colors(theme, ranked)
+    colors = _customer_colors(slots, ranked)
 
     flat_df = pivot_df.reset_index()
-    dates = pd.to_datetime(flat_df["as_of_date"])
+    edges = _week_edges(pd.to_datetime(flat_df["as_of_date"]))
+    bounds = _stream_bounds([flat_df[col] for col in center_ordered])
 
-    y_raw = [flat_df[col] for col in center_ordered]
-    x_dense, y_dense = _smooth_timeseries(dates, y_raw)
+    with _chart_style(palette):
+        fig, ax = plt.subplots(figsize=(10, 6))
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+        for name, (lower, upper) in zip(center_ordered, bounds):
+            ax.fill_between(
+                edges,
+                _hold_last(lower),
+                _hold_last(upper),
+                step="post",
+                color=colors[name],
+                label=name,
+                edgecolor="white",
+                linewidth=_STREAM_GAP_WIDTH,
+            )
 
-    ax.stackplot(
-        x_dense,
-        *y_dense,
-        labels=center_ordered,
-        baseline="sym",
-        colors=[colors[col] for col in center_ordered],
-        alpha=0.9,
-        edgecolor="white",
-        linewidth=0.5,
-    )
+        max_vol = float(pivot_df.sum(axis=1).max())
+        scale_val = _scale_bar_value(max_vol)
 
-    max_vol = np.max(np.sum(y_dense, axis=0))
-    scale_val = _scale_bar_value(max_vol)
+        scale_x = edges[-1] + (edges[-1] - edges[0]) * 0.03
+        cap_w = (edges[-1] - edges[0]) * 0.005
 
-    scale_x = x_dense[-1] + (x_dense[-1] - x_dense[0]) * 0.03
-    cap_w = (x_dense[-1] - x_dense[0]) * 0.005
+        # Draw scale bar bracket
+        ax.plot(
+            [scale_x, scale_x], [-scale_val / 2, scale_val / 2], color="#555555", lw=1.5
+        )
+        ax.plot(
+            [scale_x - cap_w, scale_x + cap_w],
+            [scale_val / 2, scale_val / 2],
+            color="#555555",
+            lw=1.5,
+        )
+        ax.plot(
+            [scale_x - cap_w, scale_x + cap_w],
+            [-scale_val / 2, -scale_val / 2],
+            color="#555555",
+            lw=1.5,
+        )
 
-    # Draw scale bar bracket
-    ax.plot(
-        [scale_x, scale_x], [-scale_val / 2, scale_val / 2], color="#555555", lw=1.5
-    )
-    ax.plot(
-        [scale_x - cap_w, scale_x + cap_w],
-        [scale_val / 2, scale_val / 2],
-        color="#555555",
-        lw=1.5,
-    )
-    ax.plot(
-        [scale_x - cap_w, scale_x + cap_w],
-        [-scale_val / 2, -scale_val / 2],
-        color="#555555",
-        lw=1.5,
-    )
+        ax.text(
+            scale_x + cap_w * 2,
+            0,
+            f"{_compact_currency(scale_val)} scale",
+            va="center",
+            ha="left",
+            fontsize=10,
+            color="#555555",
+            fontweight="bold",
+        )
 
-    ax.text(
-        scale_x + cap_w * 2,
-        0,
-        f"{_compact_currency(scale_val)} scale",
-        va="center",
-        ha="left",
-        fontsize=10,
-        color="#555555",
-        fontweight="bold",
-    )
+        dates = pd.to_datetime(flat_df["as_of_date"])
+        _set_title_and_xlabel(
+            ax, f"Vertiqal Open AR Volume Stream {get_chart_year_label(dates)}"
+        )
 
-    _set_title_and_xlabel(
-        ax, f"Vertiqal Open AR Volume Stream {get_chart_year_label(dates)}"
-    )
+        ax.xaxis_date()
+        _format_week_axis(ax)
 
-    ax.xaxis_date()
-    _format_week_axis(ax)
+        # Expand x-limit to fit the scale bar, but end the axis and its labels with
+        # the data
+        ax.set_xlim(edges[0], scale_x + (edges[-1] - edges[0]) * 0.15)
+        ax.spines["bottom"].set_bounds(edges[0], edges[-1])
+        ax.xaxis.set_major_formatter(_week_formatter_until(edges[-1]))
 
-    # Expand x-limit to fit the scale bar, but end the axis and its labels with the data
-    ax.set_xlim(x_dense[0], scale_x + (x_dense[-1] - x_dense[0]) * 0.15)
-    ax.spines["bottom"].set_bounds(x_dense[0], x_dense[-1])
-    ax.xaxis.set_major_formatter(_week_formatter_until(x_dense[-1]))
+        # The scale bar replaces the y axis, so it and its grid stay hidden
+        ax.yaxis.set_visible(False)
 
-    # Hide Y axis and borders entirely
-    ax.yaxis.set_visible(False)
-    for spine in ["left", "right", "top"]:
-        ax.spines[spine].set_visible(False)
+        return _save_figure(fig, output_path, _legend_below(fig, ax, order=ranked))
 
-    return _save_figure(fig, output_path, _legend_below(fig, ax, order=ranked))
+
+def _chart_start(first_invoice: date, as_of: date, weeks: int) -> date:
+    """Returns the first snapshot day of the chart window.
+
+    The window reaches `weeks` back from `as_of` but never before the first
+    invoice, and lands on the snapshot weekday so every chart shares its dates.
+    """
+    start = max(first_invoice, as_of - timedelta(weeks=weeks))
+    return start + timedelta(days=(SNAPSHOT_WEEKDAY - start.weekday()) % 7)
 
 
 def generate_all_reports(
@@ -499,12 +586,13 @@ def generate_all_reports(
     if not invoices:
         return {}
 
-    start_date = min(inv.invoice_date for inv in invoices)
+    first_invoice = min(inv.invoice_date for inv in invoices)
     end_date = cfg.resolve_as_of()
-    if end_date < start_date:
+    if end_date < first_invoice:
         raise ValueError(
-            f"as-of date {end_date} is before the first invoice date {start_date}"
+            f"as-of date {end_date} is before the first invoice date {first_invoice}"
         )
+    start_date = _chart_start(first_invoice, end_date, cfg.chart_weeks)
 
     fx_provider = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
     out_dir = Path(cfg.output_dir)
@@ -540,12 +628,16 @@ def generate_all_reports(
             ar_df, top_n, output_path=out_dir / "top_n_chart.png", palette=cfg.palette
         ),
         "customer_ar": generate_customer_ar_chart(
-            ar_df, output_path=out_dir / "customer_ar_chart.png", palette=cfg.palette
+            ar_df,
+            output_path=out_dir / "customer_ar_chart.png",
+            palette=cfg.palette,
+            customers=cfg.customer_palette,
         ),
         "stream": generate_customer_stream_chart(
             ar_df,
             output_path=out_dir / "customer_ar_stream_chart.png",
             palette=cfg.palette,
+            customers=cfg.customer_palette,
         ),
     }
     return {name: path for name, path in charts.items() if path}
