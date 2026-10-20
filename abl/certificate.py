@@ -1,16 +1,11 @@
 """Borrowing Base Certificate PDF report generation using ReportLab."""
 
+import warnings
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
-import os
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-import warnings
-
-warnings.filterwarnings(
-    "ignore", category=RuntimeWarning, message=".*'abl.certificate'.*"
-)
 
 from reportlab.graphics.shapes import Drawing, Line, Rect, String
 from reportlab.lib import colors
@@ -36,70 +31,121 @@ from .models import (
 )
 from .rules import is_invoice_open
 
+# Silence runpy's double-import warning for `python -m abl.certificate`.
+warnings.filterwarnings(
+    "ignore", category=RuntimeWarning, message=".*'abl.certificate'.*"
+)
+
+_FONT_DIRS = (
+    Path("/System/Library/Fonts"),
+    Path("/Library/Fonts"),
+    Path("~/Library/Fonts").expanduser(),
+    Path("/usr/share/fonts"),
+    Path("/usr/local/share/fonts"),
+    Path("~/.fonts").expanduser(),
+)
+
+# (registered name, file glob stem, core-font fallback)
+_FONT_VARIANTS = (
+    ("HelveticaNeue", "*HelveticaNeue*", "Helvetica"),
+    ("HelveticaNeue-Bold", "*HelveticaNeue*Bold*", "Helvetica-Bold"),
+    ("HelveticaNeue-Italic", "*HelveticaNeue*Italic*", "Helvetica-Oblique"),
+)
+
+_CURRENCY_SORT_ORDER = {"CAD": 0, "USD": 1}
+_CURRENCY_LABELS = {"CAD": "Domestic", "USD": "US Dollar"}
+
+
+def _find_font_file(pattern: str) -> Path | None:
+    """Returns the first TTF/OTF matching pattern across system font directories."""
+    for font_dir in _FONT_DIRS:
+        if not font_dir.exists():
+            continue
+        for ext in (".ttf", ".otf"):
+            match = next(font_dir.rglob(f"{pattern}{ext}"), None)
+            if match is not None:
+                return match
+    return None
+
+
+def _register_font(name: str, pattern: str, fallback: str) -> str:
+    """Registers a system font under name, returning fallback if unavailable."""
+    if name in pdfmetrics.getRegisteredFontNames():
+        return name
+    font_file = _find_font_file(pattern)
+    if font_file is None:
+        return fallback
+    try:
+        pdfmetrics.registerFont(TTFont(name, str(font_file)))
+    except Exception:  # ReportLab raises assorted errors on unreadable fonts
+        return fallback
+    return name
+
 
 def _resolve_fonts() -> tuple[str, str, str]:
     """Resolves Helvetica Neue font family with fallback to core Helvetica."""
-    regular_name = "Helvetica"
-    bold_name = "Helvetica-Bold"
-    oblique_name = "Helvetica-Oblique"
+    regular, bold, oblique = (_register_font(*v) for v in _FONT_VARIANTS)
+    return regular, bold, oblique
 
-    candidate_dirs = [
-        Path("/System/Library/Fonts"),
-        Path("/Library/Fonts"),
-        Path("~/Library/Fonts").expanduser(),
-        Path("/usr/share/fonts"),
-        Path("/usr/local/share/fonts"),
-        Path("~/.fonts").expanduser(),
+
+def _cad_rate_and_amount(
+    currency: str, face: Decimal, as_of: date, fx: FXProvider
+) -> tuple[Decimal, Decimal]:
+    """Returns the CAD FX rate and rounded CAD equivalent of a face amount."""
+    if currency == "CAD":
+        return Decimal("1.0000"), face
+    rate = fx(currency, "CAD", as_of)
+    return rate, (face * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _share_of(part: Decimal, total: Decimal) -> Decimal:
+    """Returns part / total to four places, or zero for a non-positive total."""
+    if total <= Decimal("0.00"):
+        return Decimal("0.0000")
+    return (part / total).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _currency_sort_key(breakdown: CurrencyBreakdown) -> tuple[int, str]:
+    """Orders CAD first, USD second, then remaining currencies alphabetically."""
+    return _CURRENCY_SORT_ORDER.get(breakdown.currency, 2), breakdown.currency
+
+
+def _currency_label(code: str) -> str:
+    """Returns the bolded currency code with a descriptive suffix where known."""
+    suffix = _CURRENCY_LABELS.get(code)
+    return f"<b>{code}</b> ({suffix})" if suffix else f"<b>{code}</b>"
+
+
+def _single_currency_breakdown(
+    report: CollateralReport, params: CertificateParams
+) -> list[CurrencyBreakdown]:
+    """Synthesizes a one-row breakdown from gross AR in the base currency."""
+    return [
+        CurrencyBreakdown(
+            currency=params.currency,
+            face_amount=report.gross_amount_cad,
+            fx_rate=Decimal("1.0000"),
+            cad_amount=report.gross_amount_cad,
+            share_pct=Decimal("1.0000"),
+        )
     ]
 
-    for d in candidate_dirs:
-        if not d.exists():
-            continue
-        # Check for Helvetica Neue variations
-        reg_candidates = list(d.rglob("*HelveticaNeue*.ttf")) + list(
-            d.rglob("*HelveticaNeue*.otf")
-        )
-        bold_candidates = list(d.rglob("*HelveticaNeue*Bold*.ttf")) + list(
-            d.rglob("*HelveticaNeue*Bold*.otf")
-        )
-        oblique_candidates = list(d.rglob("*HelveticaNeue*Italic*.ttf")) + list(
-            d.rglob("*HelveticaNeue*Italic*.otf")
-        )
 
-        if reg_candidates:
-            try:
-                if "HelveticaNeue" not in pdfmetrics.getRegisteredFontNames():
-                    pdfmetrics.registerFont(
-                        TTFont("HelveticaNeue", str(reg_candidates[0]))
-                    )
-                regular_name = "HelveticaNeue"
-            except Exception:
-                pass
-
-        if bold_candidates:
-            try:
-                if "HelveticaNeue-Bold" not in pdfmetrics.getRegisteredFontNames():
-                    pdfmetrics.registerFont(
-                        TTFont("HelveticaNeue-Bold", str(bold_candidates[0]))
-                    )
-                bold_name = "HelveticaNeue-Bold"
-            except Exception:
-                pass
-
-        if oblique_candidates:
-            try:
-                if "HelveticaNeue-Italic" not in pdfmetrics.getRegisteredFontNames():
-                    pdfmetrics.registerFont(
-                        TTFont("HelveticaNeue-Italic", str(oblique_candidates[0]))
-                    )
-                oblique_name = "HelveticaNeue-Italic"
-            except Exception:
-                pass
-
-        if regular_name.startswith("HelveticaNeue"):
-            break
-
-    return regular_name, bold_name, oblique_name
+def _display_concentrations(
+    concentrations: Sequence[DebtorConcentration], gross: Decimal, top_n: int = 5
+) -> list[DebtorConcentration]:
+    """Returns the top debtors, rolling the remainder into one "Other" row."""
+    top, others = list(concentrations[:top_n]), concentrations[top_n:]
+    if not others:
+        return top
+    other_balance = sum((d.balance_cad for d in others), Decimal("0.00"))
+    other_row = DebtorConcentration(
+        client_name=f"Other Accounts ({len(others)})",
+        balance_cad=other_balance,
+        share_pct=_share_of(other_balance, gross),
+        is_capped=False,
+    )
+    return [*top, other_row]
 
 
 def calculate_currency_breakdown(
@@ -107,7 +153,7 @@ def calculate_currency_breakdown(
     as_of: date,
     fx: FXProvider,
 ) -> list[CurrencyBreakdown]:
-    """Aggregates uncollected invoice balances by transaction currency and computes CAD equivalent share."""
+    """Aggregates open balances by currency with CAD equivalents and shares."""
     open_invoices = [inv for inv in invoices if is_invoice_open(inv, as_of)]
     if not open_invoices:
         return []
@@ -116,46 +162,22 @@ def calculate_currency_breakdown(
     for inv in open_invoices:
         currency_totals[inv.currency.upper()] += inv.invoice_amount
 
-    breakdowns: list[CurrencyBreakdown] = []
-    total_cad = Decimal("0.00")
-    temp_results: list[tuple[str, Decimal, Decimal, Decimal]] = []
-
-    for curr, face in currency_totals.items():
-        if curr == "CAD":
-            rate = Decimal("1.0000")
-            cad_amt = face
-        else:
-            rate = fx(curr, "CAD", as_of)
-            cad_amt = (face * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        total_cad += cad_amt
-        temp_results.append((curr, face, rate, cad_amt))
-
-    for curr, face, rate, cad_amt in temp_results:
-        share = (
-            (cad_amt / total_cad).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-            if total_cad > Decimal("0.00")
-            else Decimal("0.0000")
+    converted = [
+        (curr, face, *_cad_rate_and_amount(curr, face, as_of, fx))
+        for curr, face in currency_totals.items()
+    ]
+    total_cad = sum((cad_amt for *_, cad_amt in converted), Decimal("0.00"))
+    breakdowns = [
+        CurrencyBreakdown(
+            currency=curr,
+            face_amount=face,
+            fx_rate=rate,
+            cad_amount=cad_amt,
+            share_pct=_share_of(cad_amt, total_cad),
         )
-        breakdowns.append(
-            CurrencyBreakdown(
-                currency=curr,
-                face_amount=face,
-                fx_rate=rate,
-                cad_amount=cad_amt,
-                share_pct=share,
-            )
-        )
-
-    def sort_key(b: CurrencyBreakdown) -> tuple[int, str]:
-        if b.currency == "CAD":
-            return (0, b.currency)
-        if b.currency == "USD":
-            return (1, b.currency)
-        return (2, b.currency)
-
-    breakdowns.sort(key=sort_key)
-    return breakdowns
+        for curr, face, rate, cad_amt in converted
+    ]
+    return sorted(breakdowns, key=_currency_sort_key)
 
 
 def calculate_debtor_concentrations(
@@ -164,7 +186,7 @@ def calculate_debtor_concentrations(
     fx: FXProvider,
     cap_pct: Decimal = Decimal("0.30"),
 ) -> list[DebtorConcentration]:
-    """Calculates open AR balance and portfolio share per debtor, identifying concentration threshold breaches."""
+    """Returns open CAD balance and share per debtor, flagging cap breaches."""
     open_invoices = [
         convert_to_cad(inv, as_of, fx)
         for inv in invoices
@@ -211,7 +233,7 @@ def generate_certificate_pdf(
     palette: ReportPalette | None = None,
     output_path: str | Path = "bbc_certificate.pdf",
 ) -> Path:
-    """Builds a single-page landscape PDF certificate complying with Tufte financial layout standards."""
+    """Builds the single-page landscape Borrowing Base Certificate PDF."""
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,12 +337,15 @@ def generate_certificate_pdf(
     header_data = [
         [
             Paragraph(
-                "<b>VERTIQAL STUDIOS</b><br/><font size='13'><b>Borrowing Base Certificate</b></font>",
+                "<b>VERTIQAL STUDIOS</b><br/>"
+                "<font size='13'><b>Borrowing Base Certificate</b></font>",
                 s_title,
             ),
             Paragraph(
-                f"<b>As of Date:</b> {params.as_of.isoformat()} &bull; <b>Run Date:</b> {gen_time_str}<br/>"
-                f"<b>Credit Facility Limit:</b> ${params.facility_limit:,.2f} {params.currency} &bull; <b>Base Currency:</b> {params.currency}",
+                f"<b>As of Date:</b> {params.as_of.isoformat()} &bull; "
+                f"<b>Run Date:</b> {gen_time_str}<br/>"
+                f"<b>Credit Facility Limit:</b> ${params.facility_limit:,.2f} "
+                f"{params.currency} &bull; <b>Base Currency:</b> {params.currency}",
                 ParagraphStyle("HRight", parent=s_body, alignment=2),
             ),
             Paragraph(
@@ -350,19 +375,25 @@ def generate_certificate_pdf(
     param_strip_data = [
         [
             Paragraph(
-                f"<font color='{theme.muted}'>INVOICE WINDOW</font><br/><b>{start_str} &ndash; {end_str}</b>",
+                f"<font color='{theme.muted}'>INVOICE WINDOW</font><br/>"
+                f"<b>{start_str} &ndash; {end_str}</b>",
                 s_param_val,
             ),
             Paragraph(
-                f"<font color='{theme.muted}'>ADVANCE / DILUTION RATE</font><br/><b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% = {eff_pct:.1f}% Eff.</b>",
+                f"<font color='{theme.muted}'>ADVANCE / DILUTION RATE</font><br/>"
+                f"<b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% = {eff_pct:.1f}% Eff.</b>",
                 s_param_val,
             ),
             Paragraph(
-                f"<font color='{theme.muted}'>DEBTOR CONCENTRATION CAP</font><br/><b>{conc_cap_pct:.1f}% of Gross Eligible</b>",
+                f"<font color='{theme.muted}'>DEBTOR CONCENTRATION CAP</font><br/>"
+                f"<b>{conc_cap_pct:.1f}% of Gross Eligible</b>",
                 s_param_val,
             ),
             Paragraph(
-                f"<font color='{theme.muted}'>OVERDUE & TAINT COVENANTS</font><br/><b>Max {criteria.max_overdue_days}d &bull; Taint >{criteria.taint_past_due_days}d ({criteria.taint_threshold_pct * 100:.0f}%)</b>",
+                f"<font color='{theme.muted}'>OVERDUE & TAINT COVENANTS</font><br/>"
+                f"<b>Max {criteria.max_overdue_days}d &bull; "
+                f"Taint >{criteria.taint_past_due_days}d "
+                f"({criteria.taint_threshold_pct * 100:.0f}%)</b>",
                 s_param_val,
             ),
         ]
@@ -552,18 +583,9 @@ def generate_certificate_pdf(
 
     # 4. COLUMN 2:
     # 4A. ORIGINAL CURRENCY BREAKDOWN (USD / CAD)
-    curr_breakdowns = list(currency_breakdowns) if currency_breakdowns else []
-    if not curr_breakdowns:
-        # Synthesize from Gross AR if no explicit breakdown passed
-        curr_breakdowns = [
-            CurrencyBreakdown(
-                currency=params.currency,
-                face_amount=report.gross_amount_cad,
-                fx_rate=Decimal("1.0000"),
-                cad_amount=report.gross_amount_cad,
-                share_pct=Decimal("1.0000"),
-            )
-        ]
+    curr_breakdowns = list(
+        currency_breakdowns or _single_currency_breakdown(report, params)
+    )
 
     curr_rows = [
         [
@@ -575,28 +597,19 @@ def generate_certificate_pdf(
         ]
     ]
 
-    total_face_cad = Decimal("0.00")
-    for cb in curr_breakdowns:
-        curr_label = (
-            f"<b>{cb.currency}</b> (Domestic)"
-            if cb.currency == "CAD"
-            else (
-                f"<b>{cb.currency}</b> (US Dollar)"
-                if cb.currency == "USD"
-                else f"<b>{cb.currency}</b>"
-            )
-        )
-        rate_str = "1.0000" if cb.currency == "CAD" else f"{cb.fx_rate:.4f}"
-        curr_rows.append(
-            [
-                Paragraph(curr_label, s_body),
-                Paragraph(f"${cb.face_amount:,.2f}", s_right),
-                Paragraph(rate_str, s_right),
-                Paragraph(f"${cb.cad_amount:,.2f}", s_right),
-                Paragraph(f"{cb.share_pct * 100:.1f}%", s_right),
-            ]
-        )
-        total_face_cad += cb.cad_amount
+    curr_rows.extend(
+        [
+            Paragraph(_currency_label(cb.currency), s_body),
+            Paragraph(f"${cb.face_amount:,.2f}", s_right),
+            Paragraph(
+                "1.0000" if cb.currency == "CAD" else f"{cb.fx_rate:.4f}", s_right
+            ),
+            Paragraph(f"${cb.cad_amount:,.2f}", s_right),
+            Paragraph(f"{cb.share_pct * 100:.1f}%", s_right),
+        ]
+        for cb in curr_breakdowns
+    )
+    total_face_cad = sum((cb.cad_amount for cb in curr_breakdowns), Decimal("0.00"))
 
     curr_rows.append(
         [
@@ -633,50 +646,26 @@ def generate_certificate_pdf(
         ]
     ]
 
-    top_debtors = list(concentrations[:5])
-    other_debtors = list(concentrations[5:])
-    if other_debtors:
-        other_balance = sum((d.balance_cad for d in other_debtors), Decimal("0.00"))
-        gross_c = report.gross_amount_cad
-        other_share = (
-            (other_balance / gross_c).quantize(
-                Decimal("0.0001"), rounding=ROUND_HALF_UP
-            )
-            if gross_c > Decimal("0.00")
-            else Decimal("0.00")
-        )
-    else:
-        other_balance = Decimal("0.00")
-        other_share = Decimal("0.00")
-
-    display_list = list(top_debtors)
-    if other_debtors:
-        display_list.append(
-            DebtorConcentration(
-                client_name=f"Other Accounts ({len(other_debtors)})",
-                balance_cad=other_balance,
-                share_pct=other_share,
-                is_capped=False,
-            )
-        )
-
-    for item in display_list:
-        status_html = (
-            f"<font color='{theme.alert}'><b>EXCESS</b></font>"
-            if item.is_capped
-            else f"<font color='{theme.accent}'>Eligible</font>"
-        )
-        conc_rows.append(
-            [
-                Paragraph(f"&bull;&nbsp;{item.client_name}", s_body),
-                Paragraph(f"${item.balance_cad:,.0f}", s_right),
-                Paragraph(
-                    f"{item.share_pct * 100:.1f}%",
-                    s_right_alert if item.is_capped else s_right,
+    display_list = _display_concentrations(concentrations, report.gross_amount_cad)
+    conc_rows.extend(
+        [
+            Paragraph(f"&bull;&nbsp;{item.client_name}", s_body),
+            Paragraph(f"${item.balance_cad:,.0f}", s_right),
+            Paragraph(
+                f"{item.share_pct * 100:.1f}%",
+                s_right_alert if item.is_capped else s_right,
+            ),
+            Paragraph(
+                (
+                    f"<font color='{theme.alert}'><b>EXCESS</b></font>"
+                    if item.is_capped
+                    else f"<font color='{theme.accent}'>Eligible</font>"
                 ),
-                Paragraph(status_html, s_right),
-            ]
-        )
+                s_right,
+            ),
+        ]
+        for item in display_list
+    )
 
     conc_rows.append(
         [
@@ -909,16 +898,21 @@ def generate_certificate_pdf(
         cert_data = [
             [
                 Paragraph(
-                    "<b>BORROWER COMPLIANCE CERTIFICATION:</b> The undersigned Authorized Officer of the Borrower hereby certifies that "
-                    "the collateral valuations, ineligibility calculations, and borrowing base computations set forth herein are true, correct, "
-                    "and calculated in accordance with the definitions, advance rates, and covenant ratios of the Credit Facility Agreement.",
+                    "<b>BORROWER COMPLIANCE CERTIFICATION:</b> The undersigned "
+                    "Authorized Officer of the Borrower hereby certifies that the "
+                    "collateral valuations, ineligibility calculations, and borrowing "
+                    "base computations set forth herein are true, correct, and "
+                    "calculated in accordance with the definitions, advance rates, "
+                    "and covenant ratios of the Credit Facility Agreement.",
                     s_cert,
                 ),
             ],
             [
                 Paragraph(
-                    "<b>Authorized Officer:</b> ___________________________&nbsp;&nbsp;&nbsp;&nbsp;"
-                    "<b>Title:</b> Chief Financial Officer / Treasurer&nbsp;&nbsp;&nbsp;&nbsp;"
+                    "<b>Authorized Officer:</b> ___________________________"
+                    "&nbsp;&nbsp;&nbsp;&nbsp;"
+                    "<b>Title:</b> Chief Financial Officer / Treasurer"
+                    "&nbsp;&nbsp;&nbsp;&nbsp;"
                     "<b>Signature Date:</b> ___________________________",
                     s_cert,
                 )
@@ -953,7 +947,8 @@ def generate_certificate_pdf(
     footer_data = [
         [
             Paragraph(
-                f"<b>STATUS: {params.status.value.replace('_', '-')}</b> &mdash; {status_sub}.",
+                f"<b>STATUS: {params.status.value.replace('_', '-')}</b> "
+                f"&mdash; {status_sub}.",
                 ParagraphStyle("FootL", parent=s_body, fontSize=6.5, textColor=c_muted),
             ),
             Paragraph(

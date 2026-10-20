@@ -1,10 +1,11 @@
 from collections.abc import Sequence
 from datetime import date, timedelta
+
 import pandas as pd
 
 from .engine import evaluate_snapshot
 from .fx import FXProvider, make_fixed_fx_provider
-from .models import CollateralReport, LendingCriteria, Invoice
+from .models import CollateralReport, Invoice, LendingCriteria
 
 
 def run_collateral_report(

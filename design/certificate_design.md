@@ -139,4 +139,3 @@ python3 -m abl.certificate
 - `CertificateParams`: Controls as-of date, run timestamp, facility limit, existing loan drawn, report status (`PRO_FORMA`, `DRAFT`, `CERTIFIED`), company name, and currency.
 - `CurrencyBreakdown`: Holds currency code, original face amount, exchange rate to CAD, converted CAD amount, and portfolio share.
 - `DebtorConcentration`: Holds client name, CAD balance, portfolio share %, and whether the balance breaches the contractual concentration threshold.
-

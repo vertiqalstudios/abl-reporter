@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from .models import Invoice
 
@@ -8,7 +8,7 @@ type FXProvider = Callable[[str, str, date], Decimal]
 
 
 def make_fixed_fx_provider(usd_cad_rate: Decimal = Decimal("1.44")) -> FXProvider:
-    """Returns a deterministic FX provider for a fixed USDCAD quotation (1 USD = 1.44 CAD)."""
+    """Returns a deterministic FX provider fixed at 1 USD = 1.44 CAD."""
 
     def get_rate(from_curr: str, to_curr: str, as_of: date) -> Decimal:
         from_c = from_curr.upper()

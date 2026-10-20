@@ -1,8 +1,9 @@
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
-import matplotlib.pyplot as plt
+
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
@@ -349,6 +350,29 @@ def _smooth_timeseries(
     return x_dense, y_dense
 
 
+def _center_out_order(keys: Sequence[str]) -> list[str]:
+    """Orders keys (largest first) outward from the centre for stream aesthetics."""
+    return [*reversed(keys[1::2]), *keys[0::2]]
+
+
+def _scale_bar_value(max_vol: float) -> float:
+    """Rounds max_vol down to a clean 1, 2 or 5 x 10^n scale-bar length."""
+    magnitude = 10 ** np.floor(np.log10(max_vol if max_vol > 0 else 1))
+    ratio = max_vol / magnitude
+    if ratio >= 5:
+        return 5 * magnitude
+    if ratio >= 2:
+        return 2 * magnitude
+    return magnitude
+
+
+def _compact_currency(x: float) -> str:
+    """Formats a dollar amount as $1.2M or $350K."""
+    if x >= 1e6:
+        return f"${x/1e6:,.1f}M"
+    return f"${x/1e3:,.0f}K"
+
+
 def generate_customer_stream_chart(
     df: pd.DataFrame,
     output_path: Path | str = "customer_ar_stream_chart.png",
@@ -365,15 +389,8 @@ def generate_customer_stream_chart(
         index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
     ).fillna(0)
 
-    # Inside-out sorting for stream aesthetics
     col_sums = pivot_df.sum().sort_values(ascending=False)
-    sorted_keys = col_sums.index.tolist()
-    center_ordered = []
-    for i, col in enumerate(sorted_keys):
-        if i % 2 == 0:
-            center_ordered.append(col)
-        else:
-            center_ordered.insert(0, col)
+    center_ordered = _center_out_order(col_sums.index.tolist())
 
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
@@ -399,15 +416,7 @@ def generate_customer_stream_chart(
     )
 
     max_vol = np.max(np.sum(y_dense, axis=0))
-    magnitude = 10 ** np.floor(np.log10(max_vol if max_vol > 0 else 1))
-
-    # Find a clean scale marker value
-    if max_vol / magnitude >= 5:
-        scale_val = 5 * magnitude
-    elif max_vol / magnitude >= 2:
-        scale_val = 2 * magnitude
-    else:
-        scale_val = magnitude
+    scale_val = _scale_bar_value(max_vol)
 
     scale_x = x_dense[-1] + (x_dense[-1] - x_dense[0]) * 0.03
     cap_w = (x_dense[-1] - x_dense[0]) * 0.005
@@ -429,15 +438,10 @@ def generate_customer_stream_chart(
         lw=1.5,
     )
 
-    def currency_label(x: float) -> str:
-        if x >= 1e6:
-            return f"${x/1e6:,.1f}M"
-        return f"${x/1e3:,.0f}K"
-
     ax.text(
         scale_x + cap_w * 2,
         0,
-        f"↕ {currency_label(scale_val)}",
+        f"↕ {_compact_currency(scale_val)}",
         va="center",
         ha="left",
         fontsize=10,
@@ -476,7 +480,7 @@ def generate_all_reports(
     settings: ReportSettings | None = None,
     invoices: Sequence[Invoice] | None = None,
 ) -> dict[str, Path]:
-    """Generates all timeseries analytics and chart visualizations using ReportSettings."""
+    """Generates all timeseries analytics and charts from ReportSettings."""
     cfg = settings if settings is not None else ReportSettings()
 
     if invoices is None:

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from .models import (
     IneligibilityReason,

@@ -1,10 +1,10 @@
 """CSV importer for ABL collateral invoices."""
 
-from collections.abc import Iterable
 import csv
+import io
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
-import io
 from pathlib import Path
 from typing import TextIO
 
@@ -32,7 +32,7 @@ def _parse_amount(raw: str, line_num: int) -> Decimal:
 
 
 def _parse_date(raw: str, field_name: str, line_num: int) -> date:
-    """Parses an ISO format date string (YYYY-MM-DD), rejecting empty or invalid values."""
+    """Parses an ISO date (YYYY-MM-DD), rejecting empty or invalid values."""
     cleaned = raw.strip()
     if not cleaned:
         raise ValueError(f"Line {line_num}: '{field_name}' cannot be empty")
@@ -55,7 +55,6 @@ def _parse_optional_date(raw: str, field_name: str, line_num: int) -> date | Non
         raise ValueError(
             f"Line {line_num}: invalid ISO date '{raw}' for '{field_name}'"
         ) from err
-
 
 
 def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
@@ -109,7 +108,6 @@ def _read_from_stream(stream: TextIO) -> list[Invoice]:
     return parse_invoices(reader)
 
 
-
 def load_invoices_from_csv(
     source: Path | str | TextIO = Path("invoices.csv"),
 ) -> list[Invoice]:
@@ -129,4 +127,3 @@ def load_invoices_from_csv(
         return _read_from_stream(io.StringIO(source))
 
     raise FileNotFoundError(f"CSV file not found: {source}")
-

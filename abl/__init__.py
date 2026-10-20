@@ -7,6 +7,16 @@ and modern generic syntax. Pre-3.14 compatibility shims or version-fallback
 workarounds must not be used or reintroduced.
 """
 
+from .bbc import generate_bbc
+from .certificate import (
+    calculate_currency_breakdown,
+    calculate_debtor_concentrations,
+    generate_certificate,
+    generate_certificate_pdf,
+)
+from .engine import evaluate_snapshot
+from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
+from .importer import load_invoices_from_csv, parse_invoice_row, parse_invoices
 from .models import (
     CertificateParams,
     CollateralReport,
@@ -21,18 +31,6 @@ from .models import (
     ReportSettings,
     ReportStatus,
 )
-from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
-from .engine import evaluate_snapshot
-from .rules import summarize_ineligibles
-from .runner import run_collateral_report
-from .importer import load_invoices_from_csv, parse_invoice_row, parse_invoices
-from .bbc import generate_bbc
-from .certificate import (
-    calculate_currency_breakdown,
-    calculate_debtor_concentrations,
-    generate_certificate,
-    generate_certificate_pdf,
-)
 from .report import (
     generate_all_reports,
     generate_collateral_chart,
@@ -41,6 +39,8 @@ from .report import (
     generate_dso_chart,
     generate_top_n_chart,
 )
+from .rules import summarize_ineligibles
+from .runner import run_collateral_report
 
 __all__ = [
     "CertificateParams",
@@ -76,4 +76,3 @@ __all__ = [
     "generate_dso_chart",
     "generate_top_n_chart",
 ]
-

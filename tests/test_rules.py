@@ -1,8 +1,13 @@
 from datetime import date
 from decimal import Decimal
+
 import pytest
 
-from abl.models import IneligibilityReason, IneligibilitySummary, Invoice, InvoiceWithReason
+from abl.models import (
+    IneligibilityReason,
+    Invoice,
+    InvoiceWithReason,
+)
 from abl.rules import (
     calculate_concentration_cap,
     calculate_net_availability,
@@ -21,7 +26,13 @@ from abl.rules import (
         # Future invoice
         (date(2025, 3, 5), date(2025, 4, 5), None, date(2025, 3, 1), False),
         # Paid before as_of
-        (date(2025, 1, 1), date(2025, 2, 1), date(2025, 2, 28), date(2025, 3, 1), False),
+        (
+            date(2025, 1, 1),
+            date(2025, 2, 1),
+            date(2025, 2, 28),
+            date(2025, 3, 1),
+            False,
+        ),
         # Paid on as_of
         (date(2025, 1, 1), date(2025, 2, 1), date(2025, 3, 1), date(2025, 3, 1), False),
         # Paid after as_of
@@ -54,8 +65,16 @@ def test_is_invoice_open(
     ("debtor_name", "contra_set", "expected_reason"),
     [
         ("Self", frozenset({"self", "affiliate"}), IneligibilityReason.CONTRA_ACCOUNT),
-        (" self ", frozenset({"self", "affiliate"}), IneligibilityReason.CONTRA_ACCOUNT),
-        ("AFFILIATE", frozenset({"self", "affiliate"}), IneligibilityReason.CONTRA_ACCOUNT),
+        (
+            " self ",
+            frozenset({"self", "affiliate"}),
+            IneligibilityReason.CONTRA_ACCOUNT,
+        ),
+        (
+            "AFFILIATE",
+            frozenset({"self", "affiliate"}),
+            IneligibilityReason.CONTRA_ACCOUNT,
+        ),
         ("ThirdParty Inc", frozenset({"self", "affiliate"}), None),
         ("", frozenset({"self"}), None),
     ],
@@ -91,11 +110,21 @@ def test_check_aged_overdue(
 def test_find_tainted_clients() -> None:
     as_of = date(2025, 5, 1)
     invoices = [
-        Invoice("Client A", date(2025, 1, 1), date(2025, 1, 20), Decimal("60000.00"), "CAD"),
-        Invoice("Client A", date(2025, 4, 1), date(2025, 4, 25), Decimal("40000.00"), "CAD"),
-        Invoice("Client B", date(2025, 1, 1), date(2025, 1, 20), Decimal("40000.00"), "CAD"),
-        Invoice("Client B", date(2025, 4, 1), date(2025, 4, 25), Decimal("60000.00"), "CAD"),
-        Invoice("Self", date(2025, 1, 1), date(2025, 1, 20), Decimal("100000.00"), "CAD"),
+        Invoice(
+            "Client A", date(2025, 1, 1), date(2025, 1, 20), Decimal("60000.00"), "CAD"
+        ),
+        Invoice(
+            "Client A", date(2025, 4, 1), date(2025, 4, 25), Decimal("40000.00"), "CAD"
+        ),
+        Invoice(
+            "Client B", date(2025, 1, 1), date(2025, 1, 20), Decimal("40000.00"), "CAD"
+        ),
+        Invoice(
+            "Client B", date(2025, 4, 1), date(2025, 4, 25), Decimal("60000.00"), "CAD"
+        ),
+        Invoice(
+            "Self", date(2025, 1, 1), date(2025, 1, 20), Decimal("100000.00"), "CAD"
+        ),
     ]
     tainted = find_tainted_clients(
         invoices=invoices,
@@ -152,7 +181,10 @@ def test_calculate_net_availability(
     dilution_reserve: Decimal,
     expected_borrow: Decimal,
 ) -> None:
-    assert calculate_net_availability(eligible_cad, advance_rate, dilution_reserve) == expected_borrow
+    assert (
+        calculate_net_availability(eligible_cad, advance_rate, dilution_reserve)
+        == expected_borrow
+    )
 
 
 def test_summarize_ineligibles() -> None:

@@ -1,17 +1,14 @@
+import inspect
+import unittest
 from datetime import date
 from decimal import Decimal
-import inspect
 from typing import Any
-import unittest
 
-from abl.fx import FXProvider
 from abl.models import Invoice
 from abl.timeseries import (
-    AgingBucket,
     TimeSeriesConfig,
-    WeeklyDSOSnapshot,
-    compute_weekly_snapshot,
     compute_weekly_dso,
+    compute_weekly_snapshot,
     get_top_n_customers,
 )
 
@@ -20,7 +17,9 @@ class MockFX:
     def __init__(self, rates: dict[tuple[str, str], Decimal] | None = None) -> None:
         self.rates = rates or {}
 
-    def get_rate(self, from_curr: str, to_curr: str, as_of: date | None = None) -> Decimal:
+    def get_rate(
+        self, from_curr: str, to_curr: str, as_of: date | None = None
+    ) -> Decimal:
         return self.rates.get((from_curr, to_curr), Decimal("1.0"))
 
 
@@ -214,24 +213,24 @@ class TestTimeSeriesModule(unittest.TestCase):
             _create_invoice(client_name="Client C", amount=Decimal("100.00")),
             _create_invoice(client_name="Client D", amount=Decimal("50.00")),
         )
-        
+
         result = get_top_n_customers(
             invoices=invoices,
             start_date=date(2026, 1, 1),
             end_date=date(2026, 1, 31),
             top_n=2,
-            currency="CAD"
+            currency="CAD",
         )
-        
+
         # Verify Top 2 clients are selected correctly
         self.assertIn("Client A", result.top_n_names)
         self.assertIn("Client B", result.top_n_names)
         self.assertEqual(len(result.top_n_names), 2)
-        
+
         # Verify exact balances are retained
         self.assertEqual(result.top_n_balances["Client A"], Decimal("500.00"))
         self.assertEqual(result.top_n_balances["Client B"], Decimal("300.00"))
-        
+
         # Verify the sum of the remaining clients
         self.assertEqual(result.other_balance, Decimal("150.00"))
 

@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+
 import pytest
 
 from abl.fx import convert_to_cad, make_fixed_fx_provider
@@ -31,6 +32,8 @@ def test_convert_to_cad(
 
 def test_unsupported_currency_raises() -> None:
     fx = make_fixed_fx_provider()
-    inv = Invoice("Gamma Inc", date(2025, 1, 1), date(2025, 1, 31), Decimal("100.00"), "EUR")
+    inv = Invoice(
+        "Gamma Inc", date(2025, 1, 1), date(2025, 1, 31), Decimal("100.00"), "EUR"
+    )
     with pytest.raises(ValueError, match="Unsupported currency"):
         convert_to_cad(inv, date(2025, 1, 15), fx)

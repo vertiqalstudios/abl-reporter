@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import date, datetime, time
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from .fx import FXProvider, convert_to_cad
 from .models import (
@@ -24,45 +24,13 @@ from .rules import (
 )
 
 
-def evaluate_snapshot(
-    invoices: Sequence[Invoice],
+def _screen_invoices(
+    open_invoices: Sequence[Invoice],
     snapshot_date: date,
     criteria: LendingCriteria,
-    fx: FXProvider,
-) -> CollateralReport:
-    """Evaluates collateral eligibility and net borrow availability for a snapshot date.
-
-    Normalizes open invoices to CAD base currency, screens against covenants
-    (contra accounts, maximum overdue aging, cross-default delinquency ratios),
-    prorates debtor concentration excesses against the single-client threshold,
-    and calculates effective borrowing capacity net of dilution reserves.
-    """
-    week_dt = datetime.combine(snapshot_date, time(23, 59, 59))
-    open_invoices = [
-        convert_to_cad(inv, snapshot_date, fx)
-        for inv in invoices
-        if is_invoice_open(inv, snapshot_date)
-    ]
-
-    if not open_invoices:
-        return CollateralReport(
-            week=week_dt,
-            eligible_amount_cad=Decimal("0.00"),
-            ineligible_amount_cad=Decimal("0.00"),
-            net_available_borrow_cad=Decimal("0.00"),
-            ineligible_summary=IneligibilitySummary(),
-        )
-
-    tainted_clients: set[str] = set()
-    if criteria.cross_default_enabled:
-        tainted_clients = find_tainted_clients(
-            invoices=open_invoices,
-            as_of=snapshot_date,
-            taint_days=criteria.taint_past_due_days,
-            threshold_pct=criteria.taint_threshold_pct,
-            contra_clients=criteria.contra_clients,
-        )
-
+    tainted_clients: set[str],
+) -> tuple[list[InvoiceWithReason], list[Invoice]]:
+    """Splits invoices into covenant-disqualified records and eligible candidates."""
     ineligible_records: list[InvoiceWithReason] = []
     eligible_candidates: list[Invoice] = []
 
@@ -97,14 +65,16 @@ def evaluate_snapshot(
         else:
             eligible_candidates.append(inv)
 
-    gross_eligible = sum(
-        (inv.invoice_amount for inv in eligible_candidates), Decimal("0.00")
-    )
-    max_debtor_cap = calculate_concentration_cap(
-        gross_eligible, criteria.max_client_concentration_pct
-    )
+    return ineligible_records, eligible_candidates
 
 
+def _apply_concentration_cap(
+    eligible_candidates: Sequence[Invoice],
+    max_debtor_cap: Decimal,
+    criteria: LendingCriteria,
+) -> tuple[list[Invoice], list[InvoiceWithReason]]:
+    """Prorates debtors above the concentration cap into eligible and excess parts."""
+    ineligible_records: list[InvoiceWithReason] = []
     by_client: dict[str, list[Invoice]] = defaultdict(list)
     for inv in eligible_candidates:
         by_client[inv.client_name].append(inv)
@@ -149,10 +119,69 @@ def evaluate_snapshot(
                     reason=IneligibilityReason.CONCENTRATION_EXCESS,
                     reason_detail=(
                         f"Concentration cap exceeded: debtor total {client_total} CAD "
-                        f"exceeds {criteria.max_client_concentration_pct * 100:.0f}% limit ({max_debtor_cap} CAD)"
+                        f"exceeds {criteria.max_client_concentration_pct * 100:.0f}% "
+                        f"limit ({max_debtor_cap} CAD)"
                     ),
                 )
             )
+
+    return final_eligible, ineligible_records
+
+
+def evaluate_snapshot(
+    invoices: Sequence[Invoice],
+    snapshot_date: date,
+    criteria: LendingCriteria,
+    fx: FXProvider,
+) -> CollateralReport:
+    """Evaluates collateral eligibility and net borrow availability for a snapshot date.
+
+    Normalizes open invoices to CAD base currency, screens against covenants
+    (contra accounts, maximum overdue aging, cross-default delinquency ratios),
+    prorates debtor concentration excesses against the single-client threshold,
+    and calculates effective borrowing capacity net of dilution reserves.
+    """
+    week_dt = datetime.combine(snapshot_date, time(23, 59, 59))
+    open_invoices = [
+        convert_to_cad(inv, snapshot_date, fx)
+        for inv in invoices
+        if is_invoice_open(inv, snapshot_date)
+    ]
+
+    if not open_invoices:
+        return CollateralReport(
+            week=week_dt,
+            eligible_amount_cad=Decimal("0.00"),
+            ineligible_amount_cad=Decimal("0.00"),
+            net_available_borrow_cad=Decimal("0.00"),
+            ineligible_summary=IneligibilitySummary(),
+        )
+
+    tainted_clients: set[str] = set()
+    if criteria.cross_default_enabled:
+        tainted_clients = find_tainted_clients(
+            invoices=open_invoices,
+            as_of=snapshot_date,
+            taint_days=criteria.taint_past_due_days,
+            threshold_pct=criteria.taint_threshold_pct,
+            contra_clients=criteria.contra_clients,
+        )
+
+    ineligible_records, eligible_candidates = _screen_invoices(
+        open_invoices, snapshot_date, criteria, tainted_clients
+    )
+
+    gross_eligible = sum(
+        (inv.invoice_amount for inv in eligible_candidates), Decimal("0.00")
+    )
+    max_debtor_cap = calculate_concentration_cap(
+        gross_eligible, criteria.max_client_concentration_pct
+    )
+
+    final_eligible, capped_records = _apply_concentration_cap(
+        eligible_candidates, max_debtor_cap, criteria
+    )
+    ineligible_records.extend(capped_records)
 
     summary = summarize_ineligibles(ineligible_records)
     total_eligible = sum(
