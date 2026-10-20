@@ -3,7 +3,7 @@
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -25,6 +25,7 @@ from .models import (
     CollateralReport,
     CurrencyBreakdown,
     DebtorConcentration,
+    IneligibilityReason,
     Invoice,
     LendingCriteria,
     ReportPalette,
@@ -90,14 +91,24 @@ def _resolve_fonts() -> tuple[str, str, str]:
     return regular, bold, oblique
 
 
-def _cad_rate_and_amount(
-    currency: str, face: Decimal, as_of: date, fx: FXProvider
-) -> tuple[Decimal, Decimal]:
-    """Returns the CAD FX rate and rounded CAD equivalent of a face amount."""
+def _cad_rate(currency: str, as_of: date, fx: FXProvider) -> Decimal:
+    """Returns the CAD FX rate for a currency, 1.0000 for CAD itself."""
     if currency == "CAD":
-        return Decimal("1.0000"), face
-    rate = fx(currency, "CAD", as_of)
-    return rate, (face * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return Decimal("1.0000")
+    return fx(currency, "CAD", as_of)
+
+
+def _totals_by_currency(
+    open_invoices: Sequence[Invoice], as_of: date, fx: FXProvider
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    """Sums face and CAD amounts per currency, rounding per invoice like the engine."""
+    face_totals: dict[str, Decimal] = defaultdict(Decimal)
+    cad_totals: dict[str, Decimal] = defaultdict(Decimal)
+    for inv in open_invoices:
+        currency = inv.currency.upper()
+        face_totals[currency] += inv.invoice_amount
+        cad_totals[currency] += convert_to_cad(inv, as_of, fx).invoice_amount
+    return face_totals, cad_totals
 
 
 def _share_of(part: Decimal, total: Decimal) -> Decimal:
@@ -160,35 +171,41 @@ def calculate_currency_breakdown(
     if not open_invoices:
         return []
 
-    currency_totals: dict[str, Decimal] = defaultdict(Decimal)
-    for inv in open_invoices:
-        currency_totals[inv.currency.upper()] += inv.invoice_amount
-
-    converted = [
-        (curr, face, *_cad_rate_and_amount(curr, face, as_of, fx))
-        for curr, face in currency_totals.items()
-    ]
-    total_cad = sum((cad_amt for *_, cad_amt in converted), Decimal("0.00"))
+    face_totals, cad_totals = _totals_by_currency(open_invoices, as_of, fx)
+    total_cad = sum(cad_totals.values(), Decimal("0.00"))
     breakdowns = [
         CurrencyBreakdown(
             currency=curr,
             face_amount=face,
-            fx_rate=rate,
-            cad_amount=cad_amt,
-            share_pct=_share_of(cad_amt, total_cad),
+            fx_rate=_cad_rate(curr, as_of, fx),
+            cad_amount=cad_totals[curr],
+            share_pct=_share_of(cad_totals[curr], total_cad),
         )
-        for curr, face, rate, cad_amt in converted
+        for curr, face in face_totals.items()
     ]
     return sorted(breakdowns, key=_currency_sort_key)
+
+
+def capped_client_names(report: CollateralReport) -> frozenset[str]:
+    """Returns debtors the engine trimmed for breaching the concentration cap."""
+    return frozenset(
+        rec.client_name
+        for rec in report.ineligible_invoices
+        if rec.reason == IneligibilityReason.CONCENTRATION_EXCESS
+    )
 
 
 def calculate_debtor_concentrations(
     invoices: Sequence[Invoice],
     as_of: date,
     fx: FXProvider,
-    cap_pct: Decimal = Decimal("0.30"),
+    capped_clients: frozenset[str] = frozenset(),
 ) -> list[DebtorConcentration]:
-    """Returns open CAD balance and share per debtor, flagging cap breaches."""
+    """Returns open CAD balance and share per debtor, flagging capped debtors.
+
+    The cap applies to gross eligible collateral, not gross AR, so callers pass
+    the engine's capped debtors (`capped_client_names`) rather than a share test.
+    """
     open_invoices = [
         convert_to_cad(inv, as_of, fx)
         for inv in invoices
@@ -212,13 +229,12 @@ def calculate_debtor_concentrations(
         share = (balance / gross_total).quantize(
             Decimal("0.0001"), rounding=ROUND_HALF_UP
         )
-        is_capped = share > cap_pct
         concentrations.append(
             DebtorConcentration(
                 client_name=client_name,
                 balance_cad=balance,
                 share_pct=share,
-                is_capped=is_capped,
+                is_capped=client_name in capped_clients,
             )
         )
     return concentrations
@@ -281,6 +297,12 @@ def _waterfall_drawing(
     return av_draw
 
 
+def _readable_label_color(fill: Color, ink: _Ink) -> Color:
+    """Returns white text on dark fills and the primary ink on light ones."""
+    luminance = 0.299 * fill.red + 0.587 * fill.green + 0.114 * fill.blue
+    return ink.primary if luminance > 0.6 else colors.white
+
+
 def _concentration_bar_drawing(
     display_list: Sequence[DebtorConcentration],
     cap_pct: Decimal,
@@ -330,7 +352,7 @@ def _concentration_bar_drawing(
                     f"{pct*100:.0f}%",
                     fontName=ink.font_bold,
                     fontSize=6,
-                    fillColor=colors.white,
+                    fillColor=_readable_label_color(seg_color, ink),
                 )
             )
         curr_x += w_seg
@@ -803,7 +825,7 @@ def generate_certificate_pdf(
         [
             Paragraph("<b>Total Portfolio AR</b>", s_bold),
             Paragraph("-", s_right),
-            Paragraph("Base CAD", s_right_bold),
+            Paragraph("CAD", s_right_bold),
             Paragraph(f"<b>${total_face_cad:,.2f}</b>", s_right_bold),
             Paragraph("<b>100.0%</b>", s_right_bold),
         ]
@@ -1064,23 +1086,11 @@ def generate_certificate(
     as_of = cfg.certificate.as_of or max(inv.invoice_date for inv in invoices)
     fx = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
 
-    params = (
-        cfg.certificate
-        if cfg.certificate.as_of is not None
-        else CertificateParams(
-            as_of=as_of,
-            status=cfg.certificate.status,
-            existing_borrow=cfg.certificate.existing_borrow,
-            facility_limit=cfg.certificate.facility_limit,
-            currency=cfg.certificate.currency,
-            disclaimer=cfg.certificate.disclaimer,
-            generated_at=cfg.certificate.generated_at,
-        )
-    )
+    params = replace(cfg.certificate, as_of=as_of)
 
     report = generate_bbc(invoices, as_of, cfg.criteria, fx)
     concentrations = calculate_debtor_concentrations(
-        invoices, as_of, fx, cap_pct=cfg.criteria.max_client_concentration_pct
+        invoices, as_of, fx, capped_clients=capped_client_names(report)
     )
     currency_breakdowns = calculate_currency_breakdown(invoices, as_of, fx)
 

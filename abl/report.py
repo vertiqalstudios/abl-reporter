@@ -1,3 +1,4 @@
+import math
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -8,6 +9,8 @@ import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from scipy.interpolate import pchip_interpolate
 
 from abl.fx import make_fixed_fx_provider
@@ -15,6 +18,11 @@ from abl.importer import load_invoices_from_csv
 from abl.models import Invoice, ReportPalette, ReportSettings
 from abl.runner import run_collateral_report
 from abl.timeseries import compute_weekly_dso, customer_ar_balances
+
+_OTHER_LABEL = "Other customers"
+_LEGEND_COLUMNS = 4
+_LEGEND_ROW_MARGIN = 0.05
+_WEEK_TICK_FORMAT = "%b %Y"
 
 
 def get_chart_year_label(dates: pd.Series) -> str:
@@ -44,7 +52,9 @@ def get_chart_year_label(dates: pd.Series) -> str:
 
 
 def _compact_currency(x: float) -> str:
-    """Formats a dollar amount as $1.2M or $350K."""
+    """Formats a dollar amount as $1.2M, $350K or $0."""
+    if x == 0:
+        return "$0"
     if x >= 1e6:
         return f"${x/1e6:,.1f}M"
     return f"${x/1e3:,.0f}K"
@@ -55,13 +65,101 @@ def _currency_tick(x: float, pos: int) -> str:
     return _compact_currency(x)
 
 
+def _apply_theme(palette: ReportPalette | None) -> ReportPalette:
+    """Resolves the palette and installs the matching seaborn theme."""
+    theme = palette if palette is not None else ReportPalette()
+    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    return theme
+
+
+def _bar_width(dates: pd.Series) -> float:
+    """Returns a bar width in days that leaves a gap between weekly bars."""
+    diffs = dates.diff().dt.days.dropna()
+    return max(1, diffs.min() * 0.8) if not diffs.empty else 5
+
+
+def _set_title_and_xlabel(ax: Axes, title: str) -> None:
+    """Applies the shared title and week-axis label styling."""
+    ax.set_title(title, fontsize=14, fontweight="bold", pad=15)
+    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
+
+
+def _format_week_axis(ax: Axes) -> None:
+    """Formats the x axis as month and full year, angled so labels never collide."""
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(_WEEK_TICK_FORMAT))
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
+
+def _week_formatter_until(x_max: float) -> ticker.FuncFormatter:
+    """Formats week ticks like `_format_week_axis`, blanking any past the data."""
+    base = mdates.DateFormatter(_WEEK_TICK_FORMAT)
+
+    def format_tick(x: float, pos: int | None) -> str:
+        return base(x, pos) if x <= x_max else ""
+
+    return ticker.FuncFormatter(format_tick)
+
+
+def _legend_below(fig: Figure, ax: Axes, order: Sequence[str] | None = None) -> float:
+    """Places the legend under the plot and returns the bottom margin it needs."""
+    handles, labels = ax.get_legend_handles_labels()
+    if order is not None:
+        lookup = dict(zip(labels, handles))
+        labels = [name for name in order if name in lookup]
+        handles = [lookup[name] for name in labels]
+    columns = min(len(labels), _LEGEND_COLUMNS)
+    fig.legend(handles, labels, loc="lower center", ncol=columns, frameon=False)
+    return _LEGEND_ROW_MARGIN * math.ceil(len(labels) / columns)
+
+
+def _save_figure(fig: Figure, output_path: Path | str, bottom_margin: float) -> Path:
+    """Lays out the figure above the legend margin, saves it and closes it."""
+    fig.tight_layout(rect=(0, bottom_margin, 1, 1))
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def _customer_pivot(df: pd.DataFrame, max_named: int) -> pd.DataFrame | None:
+    """Pivots weekly balances by customer, folding the smallest into one column.
+
+    Columns are ordered largest customer first with the "Other" bucket last.
+    Returns None when there are no customers to plot.
+    """
+    df_filtered = df[df["client_name"] != "NONE"]
+    if df_filtered.empty:
+        return None
+
+    pivot_df = df_filtered.pivot_table(
+        index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
+    ).fillna(0)
+    ranked = pivot_df.sum().sort_values(ascending=False).index
+    named, rest = ranked[:max_named], ranked[max_named:]
+
+    grouped = pivot_df[named].copy()
+    if len(rest) > 0:
+        grouped[_OTHER_LABEL] = pivot_df[rest].sum(axis=1)
+    return grouped
+
+
+def _customer_colors(theme: ReportPalette, columns: Sequence[str]) -> dict[str, str]:
+    """Maps customers to palette shades, reserving the lightest for the bucket."""
+    named = [name for name in columns if name != _OTHER_LABEL]
+    colors = dict(zip(named, theme.debtor_colors[:-1]))
+    colors[_OTHER_LABEL] = theme.debtor_colors[-1]
+    return colors
+
+
 def generate_collateral_chart(
     df: pd.DataFrame,
     output_path: Path | str = "collateral_chart.png",
     palette: ReportPalette | None = None,
 ) -> Path:
-    theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    """Charts weekly eligible vs ineligible collateral with the average eligible."""
+    theme = _apply_theme(palette)
 
     expected_schema = [
         "week",
@@ -81,9 +179,7 @@ def generate_collateral_chart(
     ineligible = df[inelig_col].astype(float)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-
-    diffs = dates.diff().dt.days.dropna()
-    width = max(1, diffs.min() * 0.8) if not diffs.empty else 5
+    width = _bar_width(dates)
 
     ax.bar(
         dates,
@@ -107,32 +203,17 @@ def generate_collateral_chart(
         color="gray",
         linestyle="--",
         linewidth=1.5,
-        label=f"Avg: ${avg_eligible/1e3:,.0f}K",
+        label=f"Avg eligible: ${avg_eligible/1e3:,.0f}K",
     )
 
-    year = get_chart_year_label(dates)
-    ax.set_title(
-        f"Vertiqal Collateral Eligibility {year}",
-        fontsize=14,
-        fontweight="bold",
-        pad=15,
+    _set_title_and_xlabel(
+        ax, f"Vertiqal Collateral Eligibility {get_chart_year_label(dates)}"
     )
-    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
     ax.set_ylabel("Collateral Value CAD $", fontsize=11, labelpad=10)
-
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
+    _format_week_axis(ax)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
-    ax.legend(loc="upper right")
 
-    plt.tight_layout()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def generate_dso_chart(
@@ -140,8 +221,8 @@ def generate_dso_chart(
     output_path: Path | str = "dso_chart.png",
     palette: ReportPalette | None = None,
 ) -> Path | None:
-    theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    """Charts weekly equal- and dollar-weighted DSO with the equal-weight average."""
+    theme = _apply_theme(palette)
 
     df = pd.DataFrame(dso_series)
     if df.empty:
@@ -179,24 +260,11 @@ def generate_dso_chart(
             label=f"Avg Eq DSO: {avg_eq_dso:.0f} days",
         )
 
-    pd_dates = pd.to_datetime(dates)
-    year = get_chart_year_label(pd_dates)
-    ax.set_title(f"Vertiqal DSO Trends {year}", fontsize=14, fontweight="bold", pad=15)
-    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
+    _set_title_and_xlabel(ax, f"Vertiqal DSO Trends {get_chart_year_label(dates)}")
     ax.set_ylabel("Days Sales Outstanding", fontsize=11, labelpad=10)
+    _format_week_axis(ax)
 
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    ax.legend(loc="upper right")
-
-    plt.tight_layout()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def generate_top_n_chart(
@@ -205,8 +273,8 @@ def generate_top_n_chart(
     output_path: Path | str = "top_n_chart.png",
     palette: ReportPalette | None = None,
 ) -> Path | None:
-    theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    """Charts weekly open AR split between the top N customers and the rest."""
+    theme = _apply_theme(palette)
 
     df_filtered = df[df["client_name"] != "NONE"].copy()
     if df_filtered.empty:
@@ -226,9 +294,7 @@ def generate_top_n_chart(
 
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
-
-    diffs = dates.diff().dt.days.dropna()
-    width = max(1, diffs.min() * 0.8) if not diffs.empty else 5
+    width = _bar_width(dates)
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -248,29 +314,14 @@ def generate_top_n_chart(
         color=theme.accent,
     )
 
-    year = get_chart_year_label(dates)
-    ax.set_title(
-        f"Vertiqal Top Customers Concentration {year}",
-        fontsize=14,
-        fontweight="bold",
-        pad=15,
+    _set_title_and_xlabel(
+        ax, f"Vertiqal Top Customers Concentration {get_chart_year_label(dates)}"
     )
-    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
     ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
-
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
+    _format_week_axis(ax)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
-    ax.legend(loc="upper right")
 
-    plt.tight_layout()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def generate_customer_ar_chart(
@@ -278,56 +329,41 @@ def generate_customer_ar_chart(
     output_path: Path | str = "customer_ar_chart.png",
     palette: ReportPalette | None = None,
 ) -> Path | None:
-    theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    """Charts weekly open AR stacked by customer, smallest folded into 'Other'."""
+    theme = _apply_theme(palette)
 
-    df_filtered = df[df["client_name"] != "NONE"]
-    if df_filtered.empty:
+    pivot_df = _customer_pivot(df, max_named=len(theme.debtor_colors) - 1)
+    if pivot_df is None:
         print("No customer data available to plot AR chart.")
         return None
 
-    pivot_df = df_filtered.pivot_table(
-        index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
-    ).fillna(0)
-    client_cols = sorted(pivot_df.columns)
-
+    colors = _customer_colors(theme, list(pivot_df.columns))
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
-
-    diffs = dates.diff().dt.days.dropna()
-    width = max(1, diffs.min() * 0.8) if not diffs.empty else 5
+    width = _bar_width(dates)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = (
-        list(theme.debtor_colors[: len(client_cols)])
-        if len(client_cols) <= len(theme.debtor_colors)
-        else sns.color_palette("tab20", len(client_cols))
-    )
 
     bottom = pd.Series(0.0, index=flat_df.index)
-    for i, col in enumerate(client_cols):
-        ax.bar(dates, flat_df[col], bottom=bottom, width=width, color=colors[i])
+    for col in pivot_df.columns:
+        ax.bar(
+            dates,
+            flat_df[col],
+            bottom=bottom,
+            width=width,
+            color=colors[col],
+            label=col,
+        )
         bottom += flat_df[col]
 
-    year = get_chart_year_label(dates)
-    ax.set_title(
-        f"Vertiqal Open AR by Customer {year}", fontsize=14, fontweight="bold", pad=15
+    _set_title_and_xlabel(
+        ax, f"Vertiqal Open AR by Customer {get_chart_year_label(dates)}"
     )
-    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
     ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
-
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
+    _format_week_axis(ax)
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
 
-    plt.tight_layout()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return _save_figure(fig, output_path, _legend_below(fig, ax))
 
 
 def _smooth_timeseries(
@@ -366,19 +402,16 @@ def generate_customer_stream_chart(
     output_path: Path | str = "customer_ar_stream_chart.png",
     palette: ReportPalette | None = None,
 ) -> Path | None:
-    theme = palette if palette is not None else ReportPalette()
-    sns.set_theme(style="white", palette="deep", rc={"font.family": theme.font_family})
+    """Draws a smoothed stream of open AR by customer with a vertical scale bar."""
+    theme = _apply_theme(palette)
 
-    df_filtered = df[df["client_name"] != "NONE"]
-    if df_filtered.empty:
+    pivot_df = _customer_pivot(df, max_named=len(theme.debtor_colors) - 1)
+    if pivot_df is None:
         return None
 
-    pivot_df = df_filtered.pivot_table(
-        index="as_of_date", columns="client_name", values="balance", aggfunc="sum"
-    ).fillna(0)
-
-    col_sums = pivot_df.sum().sort_values(ascending=False)
-    center_ordered = _center_out_order(col_sums.index.tolist())
+    ranked = list(pivot_df.columns)
+    center_ordered = _center_out_order(ranked)
+    colors = _customer_colors(theme, ranked)
 
     flat_df = pivot_df.reset_index()
     dates = pd.to_datetime(flat_df["as_of_date"])
@@ -387,18 +420,14 @@ def generate_customer_stream_chart(
     x_dense, y_dense = _smooth_timeseries(dates, y_raw)
 
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = (
-        list(theme.debtor_colors[: len(center_ordered)])
-        if len(center_ordered) <= len(theme.debtor_colors)
-        else sns.color_palette("tab20", len(center_ordered))
-    )
 
     ax.stackplot(
         x_dense,
         *y_dense,
+        labels=center_ordered,
         baseline="sym",
-        colors=colors,
-        alpha=0.6,
+        colors=[colors[col] for col in center_ordered],
+        alpha=0.9,
         edgecolor="white",
         linewidth=0.5,
     )
@@ -429,7 +458,7 @@ def generate_customer_stream_chart(
     ax.text(
         scale_x + cap_w * 2,
         0,
-        f"↕ {_compact_currency(scale_val)}",
+        f"{_compact_currency(scale_val)} scale",
         va="center",
         ha="left",
         fontsize=10,
@@ -437,31 +466,24 @@ def generate_customer_stream_chart(
         fontweight="bold",
     )
 
-    year = get_chart_year_label(dates)
-    ax.set_title(
-        f"Vertiqal Open AR Volume Stream {year}", fontsize=14, fontweight="bold", pad=15
+    _set_title_and_xlabel(
+        ax, f"Vertiqal Open AR Volume Stream {get_chart_year_label(dates)}"
     )
-    ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
 
     ax.xaxis_date()
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    _format_week_axis(ax)
 
-    # Expand x-limit to fit the scale bar
+    # Expand x-limit to fit the scale bar, but end the axis and its labels with the data
     ax.set_xlim(x_dense[0], scale_x + (x_dense[-1] - x_dense[0]) * 0.15)
+    ax.spines["bottom"].set_bounds(x_dense[0], x_dense[-1])
+    ax.xaxis.set_major_formatter(_week_formatter_until(x_dense[-1]))
 
     # Hide Y axis and borders entirely
     ax.yaxis.set_visible(False)
     for spine in ["left", "right", "top"]:
         ax.spines[spine].set_visible(False)
 
-    plt.tight_layout()
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return _save_figure(fig, output_path, _legend_below(fig, ax, order=ranked))
 
 
 def generate_all_reports(
