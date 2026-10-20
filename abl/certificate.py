@@ -3,7 +3,7 @@
 import warnings
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -574,10 +574,9 @@ def generate_certificate_pdf(
     }.get(params.status, "Certificate Run")
 
     # 1. HEADER SECTION
+    as_of = report.as_of_date
     start_str = invoice_start.isoformat() if invoice_start is not None else "Historical"
-    end_str = (
-        invoice_end.isoformat() if invoice_end is not None else params.as_of.isoformat()
-    )
+    end_str = invoice_end.isoformat() if invoice_end is not None else as_of.isoformat()
     gen_time_str = params.generated_at.strftime("%Y-%m-%d %H:%M UTC")
 
     header_data = [
@@ -588,7 +587,7 @@ def generate_certificate_pdf(
                 s_title,
             ),
             Paragraph(
-                f"<b>As of Date:</b> {params.as_of.isoformat()} &bull; "
+                f"<b>As of Date:</b> {as_of.isoformat()} &bull; "
                 f"<b>Run Date:</b> {gen_time_str}<br/>"
                 f"<b>Credit Facility Limit:</b> ${params.facility_limit:,.2f} "
                 f"{params.currency} &bull; <b>Base Currency:</b> {params.currency}",
@@ -1068,6 +1067,14 @@ def generate_certificate_pdf(
     return path
 
 
+def _invoice_range(invoices: Sequence[Invoice], as_of: date) -> tuple[date, date]:
+    """Returns the first and last invoice dates on or before `as_of`."""
+    issued = [inv.invoice_date for inv in invoices if inv.invoice_date <= as_of]
+    if not issued:
+        raise ValueError(f"No invoices dated on or before as-of date {as_of}")
+    return min(issued), max(issued)
+
+
 def generate_certificate(
     settings: ReportSettings | None = None,
     invoices: Sequence[Invoice] | None = None,
@@ -1083,10 +1090,8 @@ def generate_certificate(
             f"No invoices available to generate certificate from: {cfg.input_source}"
         )
 
-    as_of = cfg.certificate.as_of or max(inv.invoice_date for inv in invoices)
+    as_of = cfg.resolve_as_of()
     fx = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
-
-    params = replace(cfg.certificate, as_of=as_of)
 
     report = generate_bbc(invoices, as_of, cfg.criteria, fx)
     concentrations = calculate_debtor_concentrations(
@@ -1094,8 +1099,7 @@ def generate_certificate(
     )
     currency_breakdowns = calculate_currency_breakdown(invoices, as_of, fx)
 
-    invoice_start = min(inv.invoice_date for inv in invoices)
-    invoice_end = max(inv.invoice_date for inv in invoices)
+    invoice_start, invoice_end = _invoice_range(invoices, as_of)
 
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1104,7 +1108,7 @@ def generate_certificate(
     return generate_certificate_pdf(
         report=report,
         criteria=cfg.criteria,
-        params=params,
+        params=cfg.certificate,
         concentrations=concentrations,
         currency_breakdowns=currency_breakdowns,
         invoice_start=invoice_start,
@@ -1112,13 +1116,3 @@ def generate_certificate(
         palette=cfg.palette,
         output_path=output_file,
     )
-
-
-def main() -> None:
-    """Executes Borrowing Base Certificate generation using default ReportSettings."""
-    pdf_out = generate_certificate()
-    print(f"Borrowing Base Certificate generated: {pdf_out}")
-
-
-if __name__ == "__main__":
-    main()

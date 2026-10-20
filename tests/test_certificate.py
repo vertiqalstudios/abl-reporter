@@ -248,7 +248,6 @@ def test_generate_certificate_pdf_status_variants(
     )
 
     params = CertificateParams(
-        as_of=as_of,
         status=status,
         existing_borrow=Decimal("20000.00"),
         disclaimer="Confidential Bank Workpaper",
@@ -287,7 +286,7 @@ def test_generate_certificate_pdf_debtor_rollup(
     concentrations = calculate_debtor_concentrations(invoices, as_of, fixed_fx)
     currency_breakdowns = calculate_currency_breakdown(invoices, as_of, fixed_fx)
 
-    params = CertificateParams(as_of=as_of, status=ReportStatus.CERTIFIED)
+    params = CertificateParams(status=ReportStatus.CERTIFIED)
     pdf_out = tmp_path / "test_cert_rollup.pdf"
 
     result_path = generate_certificate_pdf(
@@ -316,7 +315,7 @@ def test_generate_certificate_pdf_custom_palette(
         alert="#DC2626",
     )
 
-    params = CertificateParams(as_of=as_of, status=ReportStatus.CERTIFIED)
+    params = CertificateParams(status=ReportStatus.CERTIFIED)
     pdf_out = tmp_path / "custom_palette_cert.pdf"
 
     result_path = generate_certificate_pdf(
@@ -353,10 +352,8 @@ def test_generate_certificate_from_settings_with_textio(
     settings = ReportSettings(
         criteria=default_criteria,
         fx=fixed_fx,
-        certificate=CertificateParams(
-            as_of=date(2026, 2, 1),
-            status=ReportStatus.CERTIFIED,
-        ),
+        certificate=CertificateParams(status=ReportStatus.CERTIFIED),
+        as_of=date(2026, 2, 1),
         input_source=csv_stream,
         output_dir=tmp_path,
     )
@@ -374,13 +371,19 @@ def test_generate_certificate_from_settings_with_invoices(
     settings = ReportSettings(
         criteria=default_criteria,
         fx=fixed_fx,
-        certificate=CertificateParams(
-            as_of=date(2026, 2, 1),
-            status=ReportStatus.DRAFT,
-        ),
+        certificate=CertificateParams(status=ReportStatus.DRAFT),
+        as_of=date(2026, 2, 1),
         output_dir=tmp_path,
     )
 
     pdf_out = generate_certificate(settings, invoices=sample_invoices)
     assert pdf_out.exists()
     assert pdf_out.stat().st_size > 1000
+
+
+def test_generate_certificate_rejects_as_of_before_every_invoice(
+    tmp_path: Path, sample_invoices
+) -> None:
+    settings = ReportSettings(output_dir=tmp_path, as_of=date(2000, 1, 1))
+    with pytest.raises(ValueError, match="No invoices dated on or before"):
+        generate_certificate(settings, invoices=sample_invoices)

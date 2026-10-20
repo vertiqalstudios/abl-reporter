@@ -5,7 +5,12 @@ import pandas as pd
 
 from .engine import evaluate_snapshot
 from .fx import FXProvider, make_fixed_fx_provider
-from .models import CollateralReport, Invoice, LendingCriteria
+from .models import (
+    SNAPSHOT_WEEKDAY,
+    CollateralReport,
+    Invoice,
+    LendingCriteria,
+)
 
 
 def run_collateral_report(
@@ -14,7 +19,7 @@ def run_collateral_report(
     end_date: date,
     criteria: LendingCriteria | None = None,
     fx: FXProvider | None = None,
-    snapshot_weekday: int = 4,
+    snapshot_weekday: int = SNAPSHOT_WEEKDAY,
 ) -> tuple[list[CollateralReport], pd.DataFrame]:
     """Generates weekly snapshot reports and a summary pandas DataFrame."""
     if criteria is None:

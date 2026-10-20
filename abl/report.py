@@ -500,9 +500,11 @@ def generate_all_reports(
         return {}
 
     start_date = min(inv.invoice_date for inv in invoices)
-    end_dates = [inv.invoice_date for inv in invoices]
-    end_dates.extend([inv.paid_date for inv in invoices if inv.paid_date is not None])
-    end_date = max(end_dates) if end_dates else date.today()
+    end_date = cfg.resolve_as_of()
+    if end_date < start_date:
+        raise ValueError(
+            f"as-of date {end_date} is before the first invoice date {start_date}"
+        )
 
     fx_provider = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
     out_dir = Path(cfg.output_dir)
@@ -547,14 +549,3 @@ def generate_all_reports(
         ),
     }
     return {name: path for name, path in charts.items() if path}
-
-
-def main() -> None:
-    """Executes all chart report generation using default ReportSettings."""
-    outputs = generate_all_reports()
-    for name, path in outputs.items():
-        print(f"Report [{name}] saved to: {path}")
-
-
-if __name__ == "__main__":
-    main()
