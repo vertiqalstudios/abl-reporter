@@ -130,6 +130,21 @@ class ReportPalette:
         "#94A3B8",
         "#CBD5E1",
     )
+    grid: str = "#CBD5E1"
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerPalette:
+    """Chart colours for the largest customers in rank order, plus "Other".
+
+    Deliberately separate from `ReportPalette`: its debtor shades are one ramp,
+    these are distinct hues kept clear of its accent and alert. The order passes
+    colour-vision checks both as a plain stack and as the stream's centre-out
+    stack, so reorder only after re-validating both.
+    """
+
+    named: tuple[str, ...] = ("#eb6834", "#1baf7a", "#9085e9", "#eda100", "#e87ba4")
+    other: str = "#DAD7D0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +174,10 @@ def end_of_week(day: date) -> date:
 class ReportSettings:
     criteria: LendingCriteria = field(default_factory=LendingCriteria)
     palette: ReportPalette = field(default_factory=ReportPalette)
+    customer_palette: CustomerPalette = field(default_factory=CustomerPalette)
     certificate: CertificateParams = field(default_factory=CertificateParams)
+    # ~18 months of weekly snapshots; older invoices still feed DSO and taint
+    chart_weeks: int = 78
     fx: FXCallable | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")

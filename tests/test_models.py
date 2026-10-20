@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from abl.models import ReportSettings, end_of_week
+from abl.models import CustomerPalette, ReportPalette, ReportSettings, end_of_week
 
 
 @pytest.mark.parametrize(
@@ -28,3 +28,24 @@ def test_resolve_as_of_defaults_to_end_of_current_week() -> None:
 def test_resolve_as_of_prefers_explicit_date() -> None:
     settings = ReportSettings(as_of=date(2026, 2, 1))
     assert settings.resolve_as_of(today=date(2026, 10, 20)) == date(2026, 2, 1)
+
+
+def test_customer_palette_shares_no_colour_with_report_palette() -> None:
+    report = ReportPalette()
+    customers = CustomerPalette()
+    report_colours = {
+        report.primary,
+        report.secondary,
+        report.muted,
+        report.subtle,
+        report.accent,
+        report.alert,
+        report.border,
+        report.bg_subtle,
+        report.grid,
+        *report.debtor_colors,
+    }
+    customer_colours = {*customers.named, customers.other}
+    assert {c.lower() for c in report_colours}.isdisjoint(
+        c.lower() for c in customer_colours
+    )

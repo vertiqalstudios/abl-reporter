@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -429,19 +430,30 @@ def customer_ar_balances(
     top_n: int = 4,
     config: TimeSeriesConfig = TimeSeriesConfig(),
 ) -> pd.DataFrame:
-    """Computes weekly client AR balances, tagging clients within the Top N."""
-    top_n_result = get_top_n_customers(
-        invoices, start_date, end_date, top_n, currency, fx
-    )
-    top_n_clients = top_n_result.top_n_names
+    """Computes weekly client AR balances, tagging clients within the Top N.
 
+    The Top N rank by open balance summed across the weekly snapshots, the same
+    measure that orders customers in the charts.
+    """
     step = timedelta(days=config.step_days)
-    current_date = start_date
-    records: list[ARRecord] = []
+    weeks = [start_date + step * i for i in range((end_date - start_date) // step + 1)]
+    balances = [_week_balances(invoices, week, currency, fx) for week in weeks]
+    top_n_clients = _top_by_open_balance(balances, top_n)
 
-    while current_date <= end_date:
-        week_balances = _week_balances(invoices, current_date, currency, fx)
-        records.extend(_week_records(current_date, week_balances, top_n_clients))
-        current_date += step
-
+    records = [
+        record
+        for week, week_balances in zip(weeks, balances)
+        for record in _week_records(week, week_balances, top_n_clients)
+    ]
     return pd.DataFrame(records)
+
+
+def _top_by_open_balance(
+    weekly_balances: Sequence[dict[str, ClientVolume]], top_n: int
+) -> set[str]:
+    """Names the top_n clients by open AR summed across all weekly snapshots."""
+    totals: dict[str, Decimal] = defaultdict(Decimal)
+    for week in weekly_balances:
+        for name, cv in week.items():
+            totals[name] += cv.volume
+    return set(sorted(totals, key=totals.__getitem__, reverse=True)[:top_n])

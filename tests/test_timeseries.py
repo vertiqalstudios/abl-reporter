@@ -9,6 +9,7 @@ from abl.timeseries import (
     TimeSeriesConfig,
     compute_weekly_dso,
     compute_weekly_snapshot,
+    customer_ar_balances,
     get_top_n_customers,
 )
 
@@ -233,6 +234,33 @@ class TestTimeSeriesModule(unittest.TestCase):
 
         # Verify the sum of the remaining clients
         self.assertEqual(result.other_balance, Decimal("150.00"))
+
+    def test_customer_ar_top_n_ranks_by_open_balance_not_volume(self) -> None:
+        # Big invoices more but pays within a week; Slow stays open all month
+        invoices = (
+            _create_invoice(
+                client_name="Big",
+                invoice_date=date(2026, 1, 2),
+                amount=Decimal("1000.00"),
+                paid_date=date(2026, 1, 5),
+            ),
+            _create_invoice(
+                client_name="Slow",
+                invoice_date=date(2026, 1, 2),
+                amount=Decimal("300.00"),
+            ),
+        )
+
+        df = customer_ar_balances(
+            invoices=invoices,
+            start_date=date(2026, 1, 2),
+            end_date=date(2026, 1, 30),
+            top_n=1,
+        )
+
+        top = set(df.loc[df["is_top_n"], "client_name"])
+        self.assertEqual(top, {"Slow"})
+        self.assertEqual(df["as_of_date"].nunique(), 5)
 
 
 if __name__ == "__main__":
