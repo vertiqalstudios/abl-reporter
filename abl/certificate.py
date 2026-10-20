@@ -2,13 +2,13 @@
 
 import warnings
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-from reportlab.graphics.shapes import Drawing, Line, Rect, String
+from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.lib import colors
 from reportlab.lib.colors import Color
 from reportlab.lib.pagesizes import landscape, letter
@@ -335,33 +335,40 @@ def _readable_label_color(fill: Color, ink: _Ink) -> Color:
     return ink.primary if luminance > 0.6 else colors.white
 
 
+_BAR_WIDTH = 310
+_BAR_Y = 12
+_BAR_HEIGHT = 11
+
+
 def _concentration_bar_drawing(
     display_list: Sequence[DebtorConcentration],
-    cap_pct: Decimal,
+    share_of: Callable[[DebtorConcentration], Decimal],
+    title: str,
+    total_label: str,
     debtor_hex_colors: Sequence[Color],
     ink: _Ink,
 ) -> Drawing:
-    """Draws the 100% stacked eligible-share bar with the concentration cap marker."""
+    """Draws a 100% stacked debtor bar, sized by `share_of` on its own base."""
     conc_bar_draw = Drawing(340, 40)
     conc_bar_draw.add(
         String(
             0,
             30,
-            "DEBTOR CONCENTRATION (% OF GROSS ELIGIBLE, 100% STACKED)",
+            title,
             fontName=ink.font_bold,
             fontSize=6.5,
             fillColor=ink.primary,
         )
     )
 
-    bar_w_total = 310
+    bar_w_total = _BAR_WIDTH
     bar_x = 0
-    bar_y = 12
-    bar_h = 11
+    bar_y = _BAR_Y
+    bar_h = _BAR_HEIGHT
 
     curr_x = bar_x
     for i, item in enumerate(display_list):
-        pct = float(item.eligible_share_pct)
+        pct = float(share_of(item))
         w_seg = max(1, int(pct * bar_w_total))
         color_idx = min(i, len(debtor_hex_colors) - 1)
         seg_color = debtor_hex_colors[color_idx]
@@ -389,40 +396,35 @@ def _concentration_bar_drawing(
             )
         curr_x += w_seg
 
-    # Cap Threshold Vertical Guideline
-    cap_ratio = float(cap_pct)
-    cap_x = bar_x + int(cap_ratio * bar_w_total)
-    conc_bar_draw.add(
-        Line(
-            cap_x,
-            bar_y - 3,
-            cap_x,
-            bar_y + bar_h + 3,
-            strokeColor=ink.alert,
-            strokeWidth=1.5,
-        )
-    )
-    conc_bar_draw.add(
-        String(
-            cap_x - 14,
-            bar_y - 10,
-            f"{cap_ratio*100:.0f}% Cap",
-            fontName=ink.font_bold,
-            fontSize=6,
-            fillColor=ink.alert,
-        )
-    )
     conc_bar_draw.add(
         String(
             bar_w_total - 60,
             bar_y - 10,
-            "100% Gross Eligible",
+            total_label,
             fontName=ink.font_reg,
             fontSize=6,
             fillColor=ink.muted,
         )
     )
     return conc_bar_draw
+
+
+def _definition_paragraphs(style: ParagraphStyle) -> list[Paragraph]:
+    """Returns the footnotes defining the concentration table's share columns."""
+    return [
+        Paragraph(
+            "<b>Definitions.</b> "
+            "<super>1</super> <b>% AR</b>: the debtor's open balance as a share of "
+            "gross accounts receivable, before any exclusions.",
+            style,
+        ),
+        Paragraph(
+            "<super>2</super> <b>% Elig.</b>: the debtor's balance as a share of "
+            "gross eligible collateral, i.e. after contra, aged past due and "
+            "cross-default exclusions but before the concentration cap is applied.",
+            style,
+        ),
+    ]
 
 
 def _ineligibility_drawing(
@@ -878,8 +880,8 @@ def generate_certificate_pdf(
         [
             Paragraph("<b>Debtor Name</b>", s_bold),
             Paragraph("<b>Balance (CAD)</b>", s_right_bold),
-            Paragraph("<b>% AR</b>", s_right_bold),
-            Paragraph("<b>% Elig.</b>", s_right_bold),
+            Paragraph("<b>% AR</b><super>1</super>", s_right_bold),
+            Paragraph("<b>% Elig.</b><super>2</super>", s_right_bold),
             Paragraph("<b>Status</b>", s_right_bold),
         ]
     ]
@@ -939,10 +941,22 @@ def generate_certificate_pdf(
         ),
         report.gross_amount_cad,
     )
-    conc_bar_draw = _concentration_bar_drawing(
-        bar_list, criteria.max_client_concentration_pct, debtor_hex_colors, ink
+    ar_bar_draw = _concentration_bar_drawing(
+        display_list,
+        lambda c: c.share_pct,
+        "DEBTOR CONCENTRATION (% OF GROSS AR, 100% STACKED)",
+        "100% Gross AR",
+        debtor_hex_colors,
+        ink,
     )
-
+    conc_bar_draw = _concentration_bar_drawing(
+        bar_list,
+        lambda c: c.eligible_share_pct,
+        "DEBTOR CONCENTRATION (% OF GROSS ELIGIBLE, 100% STACKED)",
+        "100% Gross Eligible",
+        debtor_hex_colors,
+        ink,
+    )
     # Ineligibility Breakdown Bars
     inelig_items = [
         (
@@ -985,6 +999,7 @@ def generate_certificate_pdf(
         Paragraph("<b>3. DEBTOR AR CONCENTRATION</b>", s_h2),
         conc_table,
         Spacer(1, 2),
+        ar_bar_draw,
         conc_bar_draw,
         Spacer(1, 4),
         inelig_draw,
@@ -1100,6 +1115,10 @@ def generate_certificate_pdf(
         Spacer(1, 4),
     ]
     doc_elements.extend(sign_block)
+    s_note = ParagraphStyle(
+        "Note", parent=s_body, fontSize=6, leading=7.5, textColor=c_muted
+    )
+    doc_elements.extend(_definition_paragraphs(s_note))
     doc_elements.append(footer_table)
 
     doc.build(doc_elements)
