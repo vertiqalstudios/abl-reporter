@@ -74,3 +74,11 @@ def test_effective_advance_rate_nets_both_reserves() -> None:
         fx_reserve_pct=Decimal("0.025"),
     )
     assert criteria.effective_advance_rate == Decimal("0.800")
+
+
+def test_defaults_match_the_working_settings() -> None:
+    settings = ReportSettings()
+    assert settings.criteria.max_overdue_days == 90
+    assert settings.criteria.dilution_reserve_pct == Decimal("0.025")
+    assert settings.criteria.effective_advance_rate == Decimal("0.800")
+    assert settings.chart_weeks == 52

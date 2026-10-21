@@ -18,7 +18,9 @@ def test_runner_dataframe_generation() -> None:
         invoices=invoices,
         start_date=date(2025, 2, 1),
         end_date=date(2025, 2, 28),
-        criteria=LendingCriteria(fx_reserve_pct=Decimal("0.00")),
+        criteria=LendingCriteria(
+            dilution_reserve_pct=Decimal("0.05"), fx_reserve_pct=Decimal("0")
+        ),
     )
 
     assert len(reports) == 4

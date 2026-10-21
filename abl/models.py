@@ -53,12 +53,12 @@ class InvoiceWithReason(Invoice):
 @dataclass(frozen=True, slots=True)
 class LendingCriteria:
     max_client_concentration_pct: Decimal = Decimal("0.30")
-    max_overdue_days: int = 180
+    max_overdue_days: int = 90
     taint_past_due_days: int = 90
     taint_threshold_pct: Decimal = Decimal("0.50")
     cross_default_enabled: bool = True
     advance_rate: Decimal = Decimal("0.85")
-    dilution_reserve_pct: Decimal = Decimal("0.05")
+    dilution_reserve_pct: Decimal = Decimal("0.025")
     fx_reserve_pct: Decimal = Decimal("0.025")
     contra_clients: frozenset[str] = frozenset({"self"})
 
@@ -201,8 +201,8 @@ class ReportSettings:
     palette: ReportPalette = field(default_factory=ReportPalette)
     customer_palette: CustomerPalette = field(default_factory=CustomerPalette)
     certificate: CertificateParams = field(default_factory=CertificateParams)
-    # ~18 months of weekly snapshots; older invoices still feed DSO and taint
-    chart_weeks: int = 78
+    # 52 = 1 year of weekly snapshots; older invoices still feed opening AR, DSO, taint
+    chart_weeks: int = 52
     top_n_customers: int = 10
     fx: FXProvider | None = None
     # Live USD/CAD feed (see abl.fxdata) that prices collateral and measures

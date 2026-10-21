@@ -26,7 +26,7 @@ Invoice Paid Date`. There are no command-line flags; a missing CSV exits with a 
 One as-of date drives the certificate and every chart. It defaults to the **Friday of
 the current week** and is set with `ReportSettings(as_of=...)`. Anything after it is
 ignored: invoices dated later are left out, and a payment dated later still counts as
-unpaid. Charts run weekly (Fridays) over the `chart_weeks` (default 78, ~18 months)
+unpaid. Charts run weekly (Fridays) over the `chart_weeks` (default 52, 1 year)
 before the as-of date, or from the first invoice if the history is shorter. Invoices
 before the window still count, so DSO and taint rules see the full history.
 
