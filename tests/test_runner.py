@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pandas as pd
 
-from abl.models import Invoice
+from abl.models import Invoice, LendingCriteria
 from abl.runner import run_collateral_report
 
 
@@ -18,6 +18,7 @@ def test_runner_dataframe_generation() -> None:
         invoices=invoices,
         start_date=date(2025, 2, 1),
         end_date=date(2025, 2, 28),
+        criteria=LendingCriteria(fx_reserve_pct=Decimal("0.00")),
     )
 
     assert len(reports) == 4

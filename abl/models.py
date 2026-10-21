@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -59,11 +59,13 @@ class LendingCriteria:
     cross_default_enabled: bool = True
     advance_rate: Decimal = Decimal("0.85")
     dilution_reserve_pct: Decimal = Decimal("0.05")
+    fx_reserve_pct: Decimal = Decimal("0.025")
     contra_clients: frozenset[str] = frozenset({"self"})
 
     @property
     def effective_advance_rate(self) -> Decimal:
-        return max(Decimal("0.00"), self.advance_rate - self.dilution_reserve_pct)
+        reserves = self.dilution_reserve_pct + self.fx_reserve_pct
+        return max(Decimal("0.00"), self.advance_rate - reserves)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +172,7 @@ class CertificateParams:
 
 
 type FXCallable = Callable[[str, str, date], Decimal]
+type FXSeriesFetcher = Callable[[date, date], Mapping[date, Decimal]]
 
 SNAPSHOT_WEEKDAY = 4  # Friday: weekly snapshots and the default as-of land here
 
@@ -189,6 +192,9 @@ class ReportSettings:
     chart_weeks: int = 78
     top_n_customers: int = 10
     fx: FXCallable | None = None
+    # Live USD/CAD source for the volatility line only (see abl.fxdata); collateral
+    # is converted by `fx` (default: the pinned rate), never by this feed
+    fx_fetcher: FXSeriesFetcher | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")
     as_of: date | None = None

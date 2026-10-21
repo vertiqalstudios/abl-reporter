@@ -1,8 +1,15 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
-from abl.models import CustomerPalette, ReportPalette, ReportSettings, end_of_week
+from abl.models import (
+    CustomerPalette,
+    LendingCriteria,
+    ReportPalette,
+    ReportSettings,
+    end_of_week,
+)
 
 
 @pytest.mark.parametrize(
@@ -58,3 +65,12 @@ def test_top_n_customers_defaults_to_ten() -> None:
 def test_customer_palette_has_seven_distinct_named_hues() -> None:
     named = [c.lower() for c in CustomerPalette().named]
     assert len(set(named)) == len(named) == 7
+
+
+def test_effective_advance_rate_nets_both_reserves() -> None:
+    criteria = LendingCriteria(
+        advance_rate=Decimal("0.85"),
+        dilution_reserve_pct=Decimal("0.025"),
+        fx_reserve_pct=Decimal("0.025"),
+    )
+    assert criteria.effective_advance_rate == Decimal("0.800")

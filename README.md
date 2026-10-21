@@ -59,6 +59,18 @@ the largest customers by rank, separate from the certificate's `ReportPalette`) 
 (defaults to a fixed 1 USD = 1.44 CAD). To print
 the paths as the command does, pass the same object to `abl.__main__.main(settings)`.
 
+### FX and volatility
+Collateral is converted at the pinned rate (`fx`, default 1 USD = 1.44 CAD), never at
+live rates. `python -m abl` also sets `fx_fetcher=fetch_usd_cad_series`, which pulls daily
+USD/CAD from the Bank of Canada Valet API (`FXUSDCAD`, no key) only to print the 30-day
+annualised realised volatility under the currency table on the certificate.
+`make_series_fx_provider` builds an `FXProvider` from those rates (with a bank spread) for
+later use.
+
+If the fetch fails the run continues, the certificate shows volatility `N/A`, and
+`output/abl.log` holds the detail (URL, timing, error, response snippet); warnings also go
+to stderr. Leave `fx_fetcher` unset to skip the fetch.
+
 ## Running Tests
 ```bash
 uv run pytest

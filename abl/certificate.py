@@ -503,6 +503,7 @@ def generate_certificate_pdf(
     invoice_end: date | None = None,
     palette: ReportPalette | None = None,
     output_path: str | Path = "bbc_certificate.pdf",
+    fx_note: str = "",
 ) -> Path:
     """Builds the single-page landscape Borrowing Base Certificate PDF."""
 
@@ -648,6 +649,7 @@ def generate_certificate_pdf(
     # 2. RUNTIME PARAMETERS STRIP (Quiet, compact 4-cell horizontal bar)
     adv_pct = criteria.advance_rate * Decimal("100")
     dil_pct = criteria.dilution_reserve_pct * Decimal("100")
+    fx_pct = criteria.fx_reserve_pct * Decimal("100")
     eff_pct = criteria.effective_advance_rate * Decimal("100")
     conc_cap_pct = criteria.max_client_concentration_pct * Decimal("100")
 
@@ -659,8 +661,10 @@ def generate_certificate_pdf(
                 s_param_val,
             ),
             Paragraph(
-                f"<font color='{theme.muted}'>ADVANCE / DILUTION RATE</font><br/>"
-                f"<b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% = {eff_pct:.1f}% Eff.</b>",
+                f"<font color='{theme.muted}'>ADVANCE &minus; DILUTION &minus; FX"
+                "</font><br/>"
+                f"<b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% &minus; {fx_pct:.1f}% "
+                f"= {eff_pct:.1f}% Eff.</b>",
                 s_param_val,
             ),
             Paragraph(
@@ -995,6 +999,12 @@ def generate_certificate_pdf(
     col_right_flow = [
         Paragraph("<b>2. ORIGINAL CURRENCY BREAKDOWN (USD / CAD)</b>", s_h2),
         curr_table,
+        Paragraph(
+            fx_note,
+            ParagraphStyle(
+                "FXNote", parent=s_body, fontSize=6, leading=7.5, textColor=c_muted
+            ),
+        ),
         Spacer(1, 4),
         Paragraph("<b>3. DEBTOR AR CONCENTRATION</b>", s_h2),
         conc_table,
@@ -1136,6 +1146,7 @@ def _invoice_range(invoices: Sequence[Invoice], as_of: date) -> tuple[date, date
 def generate_certificate(
     settings: ReportSettings | None = None,
     invoices: Sequence[Invoice] | None = None,
+    fx_note: str = "",
 ) -> Path:
     """Evaluates collateral and generates the Borrowing Base Certificate PDF."""
     cfg = settings if settings is not None else ReportSettings()
@@ -1177,4 +1188,5 @@ def generate_certificate(
         invoice_end=invoice_end,
         palette=cfg.palette,
         output_path=output_file,
+        fx_note=fx_note,
     )

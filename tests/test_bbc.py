@@ -15,6 +15,7 @@ def default_criteria() -> LendingCriteria:
     return LendingCriteria(
         advance_rate=Decimal("0.85"),
         dilution_reserve_pct=Decimal("0.05"),
+        fx_reserve_pct=Decimal("0.00"),
         max_client_concentration_pct=Decimal("0.30"),
         max_overdue_days=180,
         taint_past_due_days=90,

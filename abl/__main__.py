@@ -1,8 +1,10 @@
 """Single entry point: `python -m abl` writes the certificate and all charts."""
 
+import logging
 from decimal import Decimal
 from pathlib import Path
 
+from .fxdata import fetch_usd_cad_series
 from .models import (
     CertificateParams,
     CustomerPalette,
@@ -13,11 +15,32 @@ from .models import (
 )
 from .pack import generate_report_pack
 
+LOG_NAME = "abl.log"
+
+
+def configure_logging(log_path: Path) -> None:
+    """Logs warnings to stderr and full detail to `log_path` for troubleshooting."""
+    root = logging.getLogger("abl")
+    root.setLevel(logging.DEBUG)
+    root.handlers.clear()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    detail = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    detail.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    root.addHandler(detail)
+    root.addHandler(console)
+
 
 def main(settings: ReportSettings | None = None) -> None:
     """Runs the report pack and prints where each output was written."""
+    cfg = settings if settings is not None else ReportSettings()
+    configure_logging(cfg.output_dir / LOG_NAME)
     try:
-        outputs = generate_report_pack(settings)
+        outputs = generate_report_pack(cfg)
     except FileNotFoundError as err:
         raise SystemExit(str(err)) from err
     for name, path in outputs.items():
@@ -29,14 +52,14 @@ if __name__ == "__main__":
     default_settings = ReportSettings(
         criteria=LendingCriteria(
             max_client_concentration_pct=Decimal("0.30"),
-            max_overdue_days=180,
+            max_overdue_days=90,
             taint_past_due_days=90,
             taint_threshold_pct=Decimal("0.50"),
             cross_default_enabled=True,
             advance_rate=Decimal("0.85"),  # % of Collateral Borrow-able against
-            dilution_reserve_pct=Decimal(
-                "0.05"
-            ),  # Advance Rate - Dilution Rate = Eff Advance Rate
+            dilution_reserve_pct=Decimal("0.025"),  # Dilution cushion
+            fx_reserve_pct=Decimal("0.025"),  # CADUSD volatility cushion, flat
+            # Advance - Dilution - FX = Eff Advance Rate
             contra_clients=frozenset(
                 {"self"}
             ),  # Names of "Self" debtors - eg Vertiqal, Gamelancer
@@ -84,6 +107,7 @@ if __name__ == "__main__":
             ),
         ),
         fx=None,
+        fx_fetcher=fetch_usd_cad_series,  # live USD/CAD, for the volatility line only
         input_source=Path("invoices_real_2.csv"),
         output_dir=Path("output"),
         as_of=None,
