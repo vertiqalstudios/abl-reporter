@@ -25,7 +25,7 @@ def main(settings: ReportSettings | None = None) -> None:
 
 
 if __name__ == "__main__":
-    # Default report settings - these are easist to tweak
+    # Default report settings - these are easiest to tweak
     default_settings = ReportSettings(
         criteria=LendingCriteria(
             max_client_concentration_pct=Decimal("0.30"),
@@ -62,7 +62,15 @@ if __name__ == "__main__":
             grid="#CBD5E1",
         ),
         customer_palette=CustomerPalette(
-            named=("#eb6834", "#1baf7a", "#9085e9", "#eda100", "#e87ba4"),
+            named=(
+                "#eb6834",
+                "#1baf7a",
+                "#9085e9",
+                "#eda100",
+                "#e87ba4",
+                "#35b7d4",
+                "#8c9a2b",
+            ),
             other="#DAD7D0",
         ),
         certificate=CertificateParams(
@@ -76,9 +84,12 @@ if __name__ == "__main__":
             ),
         ),
         fx=None,
-        input_source=Path("invoices_real_1.csv"),
+        input_source=Path("invoices_real_2.csv"),
         output_dir=Path("output"),
         as_of=None,
-        chart_weeks=78,  # ~18 months plotted; earlier invoices still feed DSO
+        # Weeks of history charted (52 = 1 year); raise or lower to vary the span.
+        # Earlier invoices still feed opening AR, DSO and taint.
+        chart_weeks=52,
+        top_n_customers=10,  # Customers ranked and tagged in the Top N charts
     )
     main(default_settings)

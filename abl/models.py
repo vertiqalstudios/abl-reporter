@@ -140,10 +140,19 @@ class CustomerPalette:
     Deliberately separate from `ReportPalette`: its debtor shades are one ramp,
     these are distinct hues kept clear of its accent and alert. The order passes
     colour-vision checks both as a plain stack and as the stream's centre-out
-    stack, so reorder only after re-validating both.
+    stack, so reorder only after re-validating both. The last two hues (ranks 6
+    and 7) are not yet colour-vision validated.
     """
 
-    named: tuple[str, ...] = ("#eb6834", "#1baf7a", "#9085e9", "#eda100", "#e87ba4")
+    named: tuple[str, ...] = (
+        "#eb6834",
+        "#1baf7a",
+        "#9085e9",
+        "#eda100",
+        "#e87ba4",
+        "#35b7d4",
+        "#8c9a2b",
+    )
     other: str = "#DAD7D0"
 
 
@@ -178,6 +187,7 @@ class ReportSettings:
     certificate: CertificateParams = field(default_factory=CertificateParams)
     # ~18 months of weekly snapshots; older invoices still feed DSO and taint
     chart_weeks: int = 78
+    top_n_customers: int = 10
     fx: FXCallable | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")

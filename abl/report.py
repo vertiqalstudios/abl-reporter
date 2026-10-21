@@ -608,7 +608,7 @@ def generate_all_reports(
     dso_series = compute_weekly_dso(
         invoices=invoices, start_date=start_date, end_date=end_date, fx=fx_provider
     )
-    top_n = 4
+    top_n = cfg.top_n_customers
     ar_df = customer_ar_balances(
         invoices=invoices,
         start_date=start_date,
