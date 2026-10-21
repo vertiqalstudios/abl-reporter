@@ -1,8 +1,10 @@
 """Single entry point: `python -m abl` writes the certificate and all charts."""
 
+import logging
 from decimal import Decimal
 from pathlib import Path
 
+from .fxdata import fetch_usd_cad_series
 from .models import (
     CertificateParams,
     CustomerPalette,
@@ -13,11 +15,32 @@ from .models import (
 )
 from .pack import generate_report_pack
 
+LOG_NAME = "abl.log"
+
+
+def configure_logging(log_path: Path) -> None:
+    """Logs warnings to stderr and full detail to `log_path` for troubleshooting."""
+    root = logging.getLogger("abl")
+    root.setLevel(logging.DEBUG)
+    root.handlers.clear()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    detail = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    detail.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    root.addHandler(detail)
+    root.addHandler(console)
+
 
 def main(settings: ReportSettings | None = None) -> None:
     """Runs the report pack and prints where each output was written."""
+    cfg = settings if settings is not None else ReportSettings()
+    configure_logging(cfg.output_dir / LOG_NAME)
     try:
-        outputs = generate_report_pack(settings)
+        outputs = generate_report_pack(cfg)
     except FileNotFoundError as err:
         raise SystemExit(str(err)) from err
     for name, path in outputs.items():
@@ -84,6 +107,8 @@ if __name__ == "__main__":
             ),
         ),
         fx=None,
+        fx_fetcher=fetch_usd_cad_series,  # live Bank of Canada USD/CAD; None = fixed
+        fx_bank_spread=Decimal("0"),  # ~0.02 (RBC, assumed) once invoices are FX'd
         input_source=Path("invoices_real_2.csv"),
         output_dir=Path("output"),
         as_of=None,

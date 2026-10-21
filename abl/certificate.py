@@ -503,6 +503,7 @@ def generate_certificate_pdf(
     invoice_end: date | None = None,
     palette: ReportPalette | None = None,
     output_path: str | Path = "bbc_certificate.pdf",
+    fx_note: str = "",
 ) -> Path:
     """Builds the single-page landscape Borrowing Base Certificate PDF."""
 
@@ -998,6 +999,12 @@ def generate_certificate_pdf(
     col_right_flow = [
         Paragraph("<b>2. ORIGINAL CURRENCY BREAKDOWN (USD / CAD)</b>", s_h2),
         curr_table,
+        Paragraph(
+            fx_note,
+            ParagraphStyle(
+                "FXNote", parent=s_body, fontSize=6, leading=7.5, textColor=c_muted
+            ),
+        ),
         Spacer(1, 4),
         Paragraph("<b>3. DEBTOR AR CONCENTRATION</b>", s_h2),
         conc_table,
@@ -1139,6 +1146,7 @@ def _invoice_range(invoices: Sequence[Invoice], as_of: date) -> tuple[date, date
 def generate_certificate(
     settings: ReportSettings | None = None,
     invoices: Sequence[Invoice] | None = None,
+    fx_note: str = "",
 ) -> Path:
     """Evaluates collateral and generates the Borrowing Base Certificate PDF."""
     cfg = settings if settings is not None else ReportSettings()
@@ -1180,4 +1188,5 @@ def generate_certificate(
         invoice_end=invoice_end,
         palette=cfg.palette,
         output_path=output_file,
+        fx_note=fx_note,
     )

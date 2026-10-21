@@ -1,6 +1,7 @@
 import io
 import re
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ import pytest
 
 from abl import ReportSettings, generate_all_reports, generate_report_pack
 from abl.fx import make_fixed_fx_provider
+from abl.fxdata import FXDataError
 from abl.importer import load_invoices_from_csv
 from abl.models import CertificateParams, CustomerPalette
 from abl.report import (
@@ -269,3 +271,18 @@ def test_chart_style_does_not_leak_into_global_matplotlib(tmp_path: Path) -> Non
     before = dict(plt.rcParams)
     generate_dso_chart(series, output_path=tmp_path / "dso.png")
     assert dict(plt.rcParams) == before
+
+
+def test_pack_survives_a_failed_rate_fetch(tmp_path: Path) -> None:
+    def broken(start: date, end: date) -> dict[date, Decimal]:
+        raise FXDataError("offline")
+
+    outputs = generate_report_pack(
+        ReportSettings(
+            input_source=io.StringIO(_sample_csv(customers=2, weeks=3)),
+            output_dir=tmp_path,
+            as_of=AS_OF,
+            fx_fetcher=broken,
+        )
+    )
+    assert outputs["certificate"].exists()

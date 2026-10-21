@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -172,6 +172,7 @@ class CertificateParams:
 
 
 type FXCallable = Callable[[str, str, date], Decimal]
+type FXSeriesFetcher = Callable[[date, date], Mapping[date, Decimal]]
 
 SNAPSHOT_WEEKDAY = 4  # Friday: weekly snapshots and the default as-of land here
 
@@ -191,6 +192,9 @@ class ReportSettings:
     chart_weeks: int = 78
     top_n_customers: int = 10
     fx: FXCallable | None = None
+    # Live USD/CAD source (see abl.fxdata); None keeps the fixed rate and no volatility
+    fx_fetcher: FXSeriesFetcher | None = None
+    fx_bank_spread: Decimal = Decimal("0")  # applied to live USD/CAD conversions
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")
     as_of: date | None = None

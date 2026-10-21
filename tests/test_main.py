@@ -10,3 +10,10 @@ def test_main_exits_with_message_when_input_csv_is_missing(tmp_path: Path) -> No
     settings = ReportSettings(input_source=tmp_path / "nope.csv", output_dir=tmp_path)
     with pytest.raises(SystemExit, match="CSV file not found"):
         main(settings)
+
+
+def test_main_writes_a_troubleshooting_log(tmp_path: Path) -> None:
+    settings = ReportSettings(input_source=tmp_path / "nope.csv", output_dir=tmp_path)
+    with pytest.raises(SystemExit):
+        main(settings)
+    assert (tmp_path / "abl.log").exists()
