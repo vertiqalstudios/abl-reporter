@@ -37,7 +37,7 @@ def configure_logging(log_path: Path) -> None:
 
 def main(settings: ReportSettings | None = None) -> None:
     """Runs the report pack and prints where each output was written."""
-    cfg = settings if settings is not None else ReportSettings()
+    cfg = settings if settings is not None else build_default_settings()
     configure_logging(cfg.output_dir / LOG_NAME)
     try:
         outputs = generate_report_pack(cfg)
@@ -47,9 +47,9 @@ def main(settings: ReportSettings | None = None) -> None:
         print(f"{name}: {path}")
 
 
-if __name__ == "__main__":
-    # Default report settings - these are easiest to tweak
-    default_settings = ReportSettings(
+def build_default_settings() -> ReportSettings:
+    """Default report settings - these are easiest to tweak."""
+    return ReportSettings(
         criteria=LendingCriteria(
             max_client_concentration_pct=Decimal("0.30"),
             max_overdue_days=90,
@@ -107,7 +107,7 @@ if __name__ == "__main__":
             ),
         ),
         fx=None,
-        fx_fetcher=fetch_usd_cad_series,  # live USD/CAD, for the volatility line only
+        fx_fetcher=fetch_usd_cad_series,  # live USD/CAD prices collateral; None=pinned
         input_source=Path("invoices_real_2.csv"),
         output_dir=Path("output"),
         as_of=None,
@@ -116,4 +116,7 @@ if __name__ == "__main__":
         chart_weeks=52,
         top_n_customers=10,  # Customers ranked and tagged in the Top N charts
     )
-    main(default_settings)
+
+
+if __name__ == "__main__":
+    main()

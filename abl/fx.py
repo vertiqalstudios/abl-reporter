@@ -1,34 +1,67 @@
-from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
-from .models import Invoice
+from .models import FXProvider, Invoice
 
-type FXProvider = Callable[[str, str, date], Decimal]
+__all__ = [
+    "FXProvider",
+    "FixedFXProvider",
+    "convert_to_cad",
+    "make_fixed_fx_provider",
+    "valuation_date",
+]
+
+DEFAULT_USD_CAD = Decimal("1.44")
 
 
-def make_fixed_fx_provider(usd_cad_rate: Decimal = Decimal("1.44")) -> FXProvider:
-    """Returns a deterministic FX provider fixed at 1 USD = 1.44 CAD."""
+@dataclass(frozen=True, slots=True)
+class FixedFXProvider:
+    """Deterministic FX at one USD/CAD rate, whatever the date."""
 
-    def get_rate(from_curr: str, to_curr: str, as_of: date) -> Decimal:
+    usd_cad_rate: Decimal
+    source: str
+
+    def __call__(self, from_curr: str, to_curr: str, as_of: date) -> Decimal:
         from_c = from_curr.upper()
         to_c = to_curr.upper()
         if from_c == to_c:
             return Decimal("1.00")
         if from_c == "USD" and to_c == "CAD":
-            return usd_cad_rate
+            return self.usd_cad_rate
         if from_c == "CAD" and to_c == "USD":
-            return (Decimal("1.00") / usd_cad_rate).quantize(
+            return (Decimal("1.00") / self.usd_cad_rate).quantize(
                 Decimal("0.00000001"), rounding=ROUND_HALF_UP
             )
         raise ValueError(f"Unsupported currency pair: {from_curr} to {to_curr}")
 
-    return get_rate
+    def rate_date(self, as_of: date) -> date:
+        """A fixed rate is valid on any date, so it is as of the date asked."""
+        return as_of
+
+
+def make_fixed_fx_provider(
+    usd_cad_rate: Decimal = DEFAULT_USD_CAD, source: str | None = None
+) -> FixedFXProvider:
+    """Returns a deterministic FX provider fixed at 1 USD = `usd_cad_rate` CAD."""
+    label = source if source is not None else f"Pinned {usd_cad_rate:.4f}"
+    return FixedFXProvider(usd_cad_rate, label)
+
+
+def valuation_date(inv: Invoice, as_of: date) -> date:
+    """Returns the pricing date: settlement if paid by as_of, otherwise as_of.
+
+    Open receivables are valued at spot on the report date; settled ones at the
+    rate they actually realised.
+    """
+    if inv.paid_date is not None and inv.paid_date <= as_of:
+        return inv.paid_date
+    return as_of
 
 
 def convert_to_cad(inv: Invoice, as_of: date, fx: FXProvider) -> Invoice:
-    """Normalizes an invoice to CAD base currency using the supplied FX provider."""
-    rate = fx(inv.currency, "CAD", as_of)
+    """Normalizes an invoice to CAD at its valuation-date rate."""
+    rate = fx(inv.currency, "CAD", valuation_date(inv, as_of))
     cad_amount = (inv.invoice_amount * rate).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )

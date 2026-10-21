@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO
 
 
 class IneligibilityReason(StrEnum):
@@ -53,12 +53,12 @@ class InvoiceWithReason(Invoice):
 @dataclass(frozen=True, slots=True)
 class LendingCriteria:
     max_client_concentration_pct: Decimal = Decimal("0.30")
-    max_overdue_days: int = 180
+    max_overdue_days: int = 90
     taint_past_due_days: int = 90
     taint_threshold_pct: Decimal = Decimal("0.50")
     cross_default_enabled: bool = True
     advance_rate: Decimal = Decimal("0.85")
-    dilution_reserve_pct: Decimal = Decimal("0.05")
+    dilution_reserve_pct: Decimal = Decimal("0.025")
     fx_reserve_pct: Decimal = Decimal("0.025")
     contra_clients: frozenset[str] = frozenset({"self"})
 
@@ -171,7 +171,20 @@ class CertificateParams:
     generated_at: datetime = field(default_factory=datetime.now)
 
 
-type FXCallable = Callable[[str, str, date], Decimal]
+class FXProvider(Protocol):
+    """Mid-market FX rates, with where they came from and the date they are for."""
+
+    source: str
+
+    def __call__(self, from_curr: str, to_curr: str, as_of: date) -> Decimal:
+        """Returns the mid-market rate to convert one unit of from_curr to to_curr."""
+        ...
+
+    def rate_date(self, as_of: date) -> date:
+        """Returns the date of the rate used for as_of (the latest fixing)."""
+        ...
+
+
 type FXSeriesFetcher = Callable[[date, date], Mapping[date, Decimal]]
 
 SNAPSHOT_WEEKDAY = 4  # Friday: weekly snapshots and the default as-of land here
@@ -188,12 +201,12 @@ class ReportSettings:
     palette: ReportPalette = field(default_factory=ReportPalette)
     customer_palette: CustomerPalette = field(default_factory=CustomerPalette)
     certificate: CertificateParams = field(default_factory=CertificateParams)
-    # ~18 months of weekly snapshots; older invoices still feed DSO and taint
-    chart_weeks: int = 78
+    # 52 = 1 year of weekly snapshots; older invoices still feed opening AR, DSO, taint
+    chart_weeks: int = 52
     top_n_customers: int = 10
-    fx: FXCallable | None = None
-    # Live USD/CAD source for the volatility line only (see abl.fxdata); collateral
-    # is converted by `fx` (default: the pinned rate), never by this feed
+    fx: FXProvider | None = None
+    # Live USD/CAD feed (see abl.fxdata) that prices collateral and measures
+    # volatility; an explicit `fx` wins, and None keeps the pinned rate throughout
     fx_fetcher: FXSeriesFetcher | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")
