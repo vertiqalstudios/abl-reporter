@@ -107,8 +107,7 @@ if __name__ == "__main__":
             ),
         ),
         fx=None,
-        fx_fetcher=fetch_usd_cad_series,  # live Bank of Canada USD/CAD; None = fixed
-        fx_bank_spread=Decimal("0"),  # ~0.02 (RBC, assumed) once invoices are FX'd
+        fx_fetcher=fetch_usd_cad_series,  # live USD/CAD, for the volatility line only
         input_source=Path("invoices_real_2.csv"),
         output_dir=Path("output"),
         as_of=None,

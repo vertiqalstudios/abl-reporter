@@ -192,9 +192,9 @@ class ReportSettings:
     chart_weeks: int = 78
     top_n_customers: int = 10
     fx: FXCallable | None = None
-    # Live USD/CAD source (see abl.fxdata); None keeps the fixed rate and no volatility
+    # Live USD/CAD source for the volatility line only (see abl.fxdata); collateral
+    # is converted by `fx` (default: the pinned rate), never by this feed
     fx_fetcher: FXSeriesFetcher | None = None
-    fx_bank_spread: Decimal = Decimal("0")  # applied to live USD/CAD conversions
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")
     as_of: date | None = None

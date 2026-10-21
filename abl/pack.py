@@ -4,7 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from .certificate import generate_certificate
-from .fxdata import format_fx_note, load_fx_market
+from .fx import make_fixed_fx_provider
+from .fxdata import format_fx_note, load_volatility
 from .importer import load_invoices_from_csv
 from .models import ReportSettings
 from .report import generate_all_reports
@@ -13,17 +14,18 @@ from .report import generate_all_reports
 def generate_report_pack(settings: ReportSettings | None = None) -> dict[str, Path]:
     """Loads invoices once and writes the certificate and all charts to `output_dir`.
 
-    Rates are loaded once too, so the certificate and charts convert identically.
+    Collateral converts at `fx` (pinned by default); live rates only feed volatility.
     Returns output paths keyed by name, with the PDF under "certificate".
     """
     cfg = settings if settings is not None else ReportSettings()
     invoices = tuple(load_invoices_from_csv(cfg.input_source))
 
     as_of = cfg.resolve_as_of()
-    first_date = min((inv.invoice_date for inv in invoices), default=as_of)
-    market = load_fx_market(cfg.fx_fetcher, first_date, as_of, cfg.fx_bank_spread)
-    priced = replace(cfg, fx=cfg.fx if cfg.fx is not None else market.provider)
+    fx = cfg.fx if cfg.fx is not None else make_fixed_fx_provider()
+    reading = load_volatility(cfg.fx_fetcher, as_of)
+    note = format_fx_note(reading, fx("USD", "CAD", as_of))
 
-    certificate = generate_certificate(priced, invoices, fx_note=format_fx_note(market))
+    priced = replace(cfg, fx=fx)
+    certificate = generate_certificate(priced, invoices, fx_note=note)
     charts = generate_all_reports(priced, invoices)
     return {"certificate": certificate, **charts}

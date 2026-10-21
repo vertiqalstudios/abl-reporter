@@ -8,14 +8,14 @@ import pytest
 
 from abl.fxdata import (
     BOC_SOURCE,
-    FALLBACK_SOURCE,
-    FIXED_SOURCE,
+    NOT_CONFIGURED_SOURCE,
+    UNAVAILABLE_SOURCE,
     FXDataError,
-    FXMarket,
     RateSeries,
+    VolatilityReading,
     fetch_usd_cad_series,
     format_fx_note,
-    load_fx_market,
+    load_volatility,
     make_series_fx_provider,
     parse_boc_observations,
     rate_on,
@@ -138,48 +138,56 @@ def test_series_provider_rejects_unknown_pairs() -> None:
         fx("EUR", "CAD", FRIDAY)
 
 
-def test_load_fx_market_without_fetcher_is_fixed() -> None:
-    market = load_fx_market(None, date(2026, 1, 1), FRIDAY)
-    assert market.source == FIXED_SOURCE
-    assert market.volatility is None
-    assert market.provider("USD", "CAD", FRIDAY) == Decimal("1.44")
+def test_load_volatility_without_fetcher_is_not_configured() -> None:
+    reading = load_volatility(None, FRIDAY)
+    assert reading == VolatilityReading(NOT_CONFIGURED_SOURCE)
 
 
-def test_load_fx_market_live() -> None:
+def test_load_volatility_live() -> None:
     series = _series(["1.40", "1.41"] * 20)
-    market = load_fx_market(lambda start, end: series, date(2026, 1, 1), FRIDAY)
-    assert market.source == BOC_SOURCE
-    assert market.volatility is not None
-    assert market.provider("USD", "CAD", FRIDAY) == series[FRIDAY]
+    reading = load_volatility(lambda start, end: series, FRIDAY)
+    assert reading.source == BOC_SOURCE
+    assert reading.volatility is not None
 
 
-def test_load_fx_market_falls_back_and_logs_on_failure(
+def test_load_volatility_requests_a_full_window() -> None:
+    requested: list[tuple[date, date]] = []
+
+    def fetch(start: date, end: date) -> RateSeries:
+        requested.append((start, end))
+        return _series(["1.40", "1.41"] * 20)
+
+    load_volatility(fetch, FRIDAY)
+    start, end = requested[0]
+    assert (end - start).days >= 60
+    assert end == FRIDAY
+
+
+def test_load_volatility_logs_and_reports_na_on_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     def broken(start: date, end: date) -> RateSeries:
         raise FXDataError("boom")
 
     with caplog.at_level(logging.ERROR, logger="abl.fxdata"):
-        market = load_fx_market(broken, date(2026, 1, 1), FRIDAY)
-    assert market.source == FALLBACK_SOURCE
-    assert market.volatility is None
+        reading = load_volatility(broken, FRIDAY)
+    assert reading == VolatilityReading(UNAVAILABLE_SOURCE)
     assert "boom" in caplog.text
 
 
-def test_load_fx_market_keeps_rates_when_volatility_is_thin() -> None:
-    series = _series(["1.40"] * 3)
-    market = load_fx_market(lambda start, end: series, date(2026, 1, 1), FRIDAY)
-    assert market.source == BOC_SOURCE
-    assert market.volatility is None
+def test_load_volatility_keeps_source_when_data_is_thin() -> None:
+    reading = load_volatility(lambda start, end: _series(["1.40"] * 3), FRIDAY)
+    assert reading.source == BOC_SOURCE
+    assert reading.volatility is None
 
 
 def test_format_fx_note_reports_na_without_volatility() -> None:
-    note = format_fx_note(FXMarket(lambda *_: Decimal("1"), "Somewhere"))
-    assert "volatility: N/A" in note
-    assert "FX source: Somewhere." in note
+    note = format_fx_note(VolatilityReading("Somewhere"), Decimal("1.44"))
+    assert "volatility: N/A [Somewhere]" in note
+    assert "pinned USD/CAD 1.4400" in note
 
 
 def test_format_fx_note_reports_annualised_percentage() -> None:
     vol = realized_volatility(_series(["1.40", "1.4140"] * 15 + ["1.40"]), FRIDAY)
-    note = format_fx_note(FXMarket(lambda *_: Decimal("1"), BOC_SOURCE, vol))
+    note = format_fx_note(VolatilityReading(BOC_SOURCE, vol), Decimal("1.44"))
     assert "annualised (30 daily returns to 2026-10-23)" in note
