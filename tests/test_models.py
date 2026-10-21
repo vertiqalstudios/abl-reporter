@@ -49,3 +49,12 @@ def test_customer_palette_shares_no_colour_with_report_palette() -> None:
     assert {c.lower() for c in report_colours}.isdisjoint(
         c.lower() for c in customer_colours
     )
+
+
+def test_top_n_customers_defaults_to_ten() -> None:
+    assert ReportSettings().top_n_customers == 10
+
+
+def test_customer_palette_has_seven_distinct_named_hues() -> None:
+    named = [c.lower() for c in CustomerPalette().named]
+    assert len(set(named)) == len(named) == 7

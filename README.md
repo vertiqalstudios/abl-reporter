@@ -53,7 +53,7 @@ settings = ReportSettings(
 outputs = generate_report_pack(settings)  # {"certificate": ..., "collateral": ..., ...}
 ```
 
-`ReportSettings` also takes `criteria` (`LendingCriteria`: advance rate, concentration
+`ReportSettings` also takes `top_n_customers` (default 10) and `criteria` (`LendingCriteria`: advance rate, concentration
 cap, taint rules), `palette`, `customer_palette` (`CustomerPalette`: chart colours for
 the largest customers by rank, separate from the certificate's `ReportPalette`) and `fx`
 (defaults to a fixed 1 USD = 1.44 CAD). To print
