@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-from typing import TextIO
+from typing import Protocol, TextIO
 
 
 class IneligibilityReason(StrEnum):
@@ -171,7 +171,20 @@ class CertificateParams:
     generated_at: datetime = field(default_factory=datetime.now)
 
 
-type FXCallable = Callable[[str, str, date], Decimal]
+class FXProvider(Protocol):
+    """Mid-market FX rates, with where they came from and the date they are for."""
+
+    source: str
+
+    def __call__(self, from_curr: str, to_curr: str, as_of: date) -> Decimal:
+        """Returns the mid-market rate to convert one unit of from_curr to to_curr."""
+        ...
+
+    def rate_date(self, as_of: date) -> date:
+        """Returns the date of the rate used for as_of (the latest fixing)."""
+        ...
+
+
 type FXSeriesFetcher = Callable[[date, date], Mapping[date, Decimal]]
 
 SNAPSHOT_WEEKDAY = 4  # Friday: weekly snapshots and the default as-of land here
@@ -191,9 +204,9 @@ class ReportSettings:
     # ~18 months of weekly snapshots; older invoices still feed DSO and taint
     chart_weeks: int = 78
     top_n_customers: int = 10
-    fx: FXCallable | None = None
-    # Live USD/CAD source for the volatility line only (see abl.fxdata); collateral
-    # is converted by `fx` (default: the pinned rate), never by this feed
+    fx: FXProvider | None = None
+    # Live USD/CAD feed (see abl.fxdata) that prices collateral and measures
+    # volatility; an explicit `fx` wins, and None keeps the pinned rate throughout
     fx_fetcher: FXSeriesFetcher | None = None
     input_source: Path | str | TextIO = Path("invoices.csv")
     output_dir: Path = Path("output")

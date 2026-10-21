@@ -56,20 +56,30 @@ outputs = generate_report_pack(settings)  # {"certificate": ..., "collateral": .
 `ReportSettings` also takes `top_n_customers` (default 10) and `criteria` (`LendingCriteria`: advance rate, concentration
 cap, taint rules), `palette`, `customer_palette` (`CustomerPalette`: chart colours for
 the largest customers by rank, separate from the certificate's `ReportPalette`) and `fx`
-(defaults to a fixed 1 USD = 1.44 CAD). To print
+(an `FXProvider`; defaults to a pinned 1 USD = 1.44 CAD). To print
 the paths as the command does, pass the same object to `abl.__main__.main(settings)`.
 
-### FX and volatility
-Collateral is converted at the pinned rate (`fx`, default 1 USD = 1.44 CAD), never at
-live rates. `python -m abl` also sets `fx_fetcher=fetch_usd_cad_series`, which pulls daily
-USD/CAD from the Bank of Canada Valet API (`FXUSDCAD`, no key) only to print the 30-day
-annualised realised volatility under the currency table on the certificate.
-`make_series_fx_provider` builds an `FXProvider` from those rates (with a bank spread) for
-later use.
+### FX pricing and volatility
+Receivables are priced at **spot on the report date**: each weekly snapshot (and the
+certificate) values open USD invoices at that date's rate. An invoice already paid by then
+is priced at its **settlement date** rate instead (`abl.fx.valuation_date`). The bank
+spread never touches valuation; the 2.5% FX reserve is the buffer for that.
 
-If the fetch fails the run continues, the certificate shows volatility `N/A`, and
+`python -m abl` and `abl-report` set `fx_fetcher=fetch_usd_cad_series`, which pulls daily
+USD/CAD from the Bank of Canada Valet API (`FXUSDCAD`, no key, a daily average rather than
+a closing rate). The certificate prints the spot rate, its source and fixing date, and the
+30-day annualised realised volatility under the currency table. A date with no fixing uses
+the latest earlier one.
+
+An `FXProvider` carries a `source` and a `rate_date(as_of)`. `SeriesFXProvider` also has
+`conversion_rate(...)`, which applies `bank_spread` for actual conversions only.
+Without `fx_fetcher` (the default for a bare `ReportSettings()`) the pinned
+`make_fixed_fx_provider()` rate (1 USD = 1.44 CAD) is used; so is an explicit `fx`.
+
+If the fetch fails or doesn't cover the invoice history, the run continues on the pinned
+rate, labelled "Pinned 1.4400, live unavailable" on the certificate with volatility `N/A`.
 `output/abl.log` holds the detail (URL, timing, error, response snippet); warnings also go
-to stderr. Leave `fx_fetcher` unset to skip the fetch.
+to stderr.
 
 ## Running Tests
 ```bash

@@ -1,4 +1,4 @@
-"""Bank of Canada USD/CAD rates: fetch, realised volatility and a rate provider.
+"""Bank of Canada USD/CAD rates: fetch, FX provider and realised volatility.
 
 I/O is confined to `fetch_usd_cad_series`; everything else is pure. Detail goes to
 the `abl.fxdata` logger so a failed or odd run can be diagnosed from the log.
@@ -16,15 +16,15 @@ from decimal import ROUND_HALF_UP, Decimal
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from .fx import FXProvider
+from .fx import make_fixed_fx_provider
+from .models import FXProvider
 
 log = logging.getLogger(__name__)
 
 BOC_SERIES = "FXUSDCAD"
 BOC_URL = "https://www.bankofcanada.ca/valet/observations/{series}/json"
 BOC_SOURCE = "Bank of Canada FXUSDCAD (daily average)"
-NOT_CONFIGURED_SOURCE = "not configured"
-UNAVAILABLE_SOURCE = "Bank of Canada unavailable"
+FALLBACK_SOURCE = "Pinned 1.4400, live unavailable"
 TRADING_DAYS_PER_YEAR = 252
 VOL_WINDOW_DAYS = 30
 MIN_RETURNS = 10  # fewer daily returns than this is too thin to call a volatility
@@ -50,10 +50,10 @@ class RealizedVolatility:
 
 
 @dataclass(frozen=True, slots=True)
-class VolatilityReading:
-    """Realised volatility, if it could be measured, and the source it came from."""
+class FXMarket:
+    """The provider that prices collateral, plus volatility when it was measured."""
 
-    source: str
+    provider: FXProvider
     volatility: RealizedVolatility | None = None
 
 
@@ -134,35 +134,55 @@ def realized_volatility(
     return RealizedVolatility(annualized, len(returns), window_start, window_end)
 
 
-def make_series_fx_provider(
-    series: RateSeries, bank_spread: Decimal = Decimal("0")
-) -> FXProvider:
-    """Builds an FX provider from a USD/CAD series, with an optional bank spread.
+@dataclass(frozen=True, slots=True)
+class SeriesFXProvider:
+    """Mid-market FX from a USD/CAD series, using the latest fixing on or before a date.
 
-    The bank buys USD at mid less the spread and sells it at mid plus the spread, so
-    USD to CAD gets fewer dollars and CAD to USD costs more. Zero is mid-market.
+    Calling it gives the mid rate, which values collateral. `conversion_rate` adds
+    the bank spread and is for actual conversions only: the bank buys USD at mid
+    less the spread and sells it at mid plus the spread.
     """
 
-    def get_rate(from_curr: str, to_curr: str, as_of: date) -> Decimal:
+    series: RateSeries
+    source: str = BOC_SOURCE
+    bank_spread: Decimal = Decimal("0")
+
+    def __call__(self, from_curr: str, to_curr: str, as_of: date) -> Decimal:
         pair = (from_curr.upper(), to_curr.upper())
         if pair[0] == pair[1]:
             return Decimal("1.00")
-        mid = rate_on(series, as_of)
+        mid = rate_on(self.series, as_of)
         match pair:
             case ("USD", "CAD"):
-                return mid * (Decimal("1") - bank_spread)
+                return mid
             case ("CAD", "USD"):
-                return (Decimal("1") / (mid * (Decimal("1") + bank_spread))).quantize(
-                    Decimal("0.00000001"), rounding=ROUND_HALF_UP
-                )
+                return _invert(mid)
         raise ValueError(f"Unsupported currency pair: {from_curr} to {to_curr}")
 
-    return get_rate
+    def rate_date(self, as_of: date) -> date:
+        """Returns the fixing date the rate for as_of comes from."""
+        return _latest_on_or_before(self.series, as_of)
+
+    def conversion_rate(self, from_curr: str, to_curr: str, as_of: date) -> Decimal:
+        """Returns the rate the bank would give, spread included."""
+        mid = self(from_curr, to_curr, as_of)
+        match (from_curr.upper(), to_curr.upper()):
+            case ("USD", "CAD"):
+                return mid * (Decimal("1") - self.bank_spread)
+            case ("CAD", "USD"):
+                return _invert(_invert(mid) * (Decimal("1") + self.bank_spread))
+        return mid
 
 
-def _series_start(as_of: date) -> date:
-    """Returns how far back to fetch so a full volatility window is covered."""
-    return as_of - timedelta(days=2 * VOL_WINDOW_DAYS + MAX_STALE_DAYS)
+def _invert(rate: Decimal) -> Decimal:
+    """Returns 1 / rate to eight places."""
+    return (Decimal("1") / rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
+
+
+def _series_start(first_date: date, as_of: date) -> date:
+    """Returns how far back to fetch: all invoice history, and a full vol window."""
+    earliest = min(first_date, as_of - timedelta(days=2 * VOL_WINDOW_DAYS))
+    return earliest - timedelta(days=MAX_STALE_DAYS)
 
 
 def _volatility_or_none(series: RateSeries, as_of: date) -> RealizedVolatility | None:
@@ -174,34 +194,45 @@ def _volatility_or_none(series: RateSeries, as_of: date) -> RealizedVolatility |
         return None
 
 
-def load_volatility(
-    fetch: Callable[[date, date], RateSeries] | None, as_of: date
-) -> VolatilityReading:
-    """Measures USD/CAD volatility; never raises, so a data outage can't stop a report.
+def _fetch_covering(
+    fetch: Callable[[date, date], RateSeries], first_date: date, as_of: date
+) -> RateSeries:
+    """Fetches rates and checks both ends are covered, so pricing can't fail later."""
+    series = fetch(_series_start(first_date, as_of), as_of)
+    rate_on(series, first_date)
+    rate_on(series, as_of)
+    return series
 
-    A fetch failure is logged in full and shows as N/A on the certificate.
+
+def load_fx_market(
+    fetch: Callable[[date, date], RateSeries] | None, first_date: date, as_of: date
+) -> FXMarket:
+    """Loads live rates, or the pinned rate when `fetch` is unset or fails.
+
+    A failure is logged in full and never stops the report. The pinned fallback
+    is labelled as such in its `source`, which the certificate prints.
     """
     if fetch is None:
-        return VolatilityReading(NOT_CONFIGURED_SOURCE)
+        return FXMarket(make_fixed_fx_provider())
     try:
-        series = fetch(_series_start(as_of), as_of)
+        series = _fetch_covering(fetch, first_date, as_of)
     except FXDataError as err:
-        log.error("Volatility unavailable, live rates not fetched: %s", err)
-        return VolatilityReading(UNAVAILABLE_SOURCE)
-    return VolatilityReading(BOC_SOURCE, _volatility_or_none(series, as_of))
+        log.error("Live FX unavailable, using the pinned rate: %s", err)
+        return FXMarket(make_fixed_fx_provider(source=FALLBACK_SOURCE))
+    return FXMarket(SeriesFXProvider(series), _volatility_or_none(series, as_of))
 
 
-def format_fx_note(reading: VolatilityReading, pinned_rate: Decimal) -> str:
-    """One line for the certificate: volatility, its source and the pinned rate."""
-    vol = reading.volatility
+def format_fx_note(market: FXMarket, as_of: date) -> str:
+    """One line for the certificate: spot, its source and date, realised volatility."""
+    provider = market.provider
+    spot = provider("USD", "CAD", as_of)
+    vol = market.volatility
     if vol is None:
         shown = "N/A"
     else:
-        shown = (
-            f"{vol.annualized * 100:.1f}% annualised "
-            f"({vol.returns} daily returns to {vol.window_end:%Y-%m-%d})"
-        )
+        shown = f"{vol.annualized * 100:.1f}% annualised ({vol.returns} daily returns)"
     return (
-        f"USD/CAD {VOL_WINDOW_DAYS}-day realised volatility: {shown} "
-        f"[{reading.source}]. Collateral converted at pinned USD/CAD {pinned_rate:.4f}."
+        f"USD/CAD spot {spot:.4f} [{provider.source}, "
+        f"rate date {provider.rate_date(as_of):%Y-%m-%d}]. "
+        f"{VOL_WINDOW_DAYS}-day realised volatility: {shown}."
     )

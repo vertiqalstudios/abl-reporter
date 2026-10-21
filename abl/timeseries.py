@@ -7,7 +7,7 @@ from enum import StrEnum
 
 import pandas as pd
 
-from abl.fx import FXProvider
+from abl.fx import FXProvider, valuation_date
 from abl.models import Invoice
 
 
@@ -72,6 +72,19 @@ def _convert_currency(
     raise ValueError(f"Unsupported target currency: {to_currency}; expected CAD")
 
 
+def _convert_invoice(
+    inv: Invoice, currency: str, fx: FXProvider | None, as_of: date
+) -> Decimal:
+    """Converts an invoice amount at its valuation-date rate (see `valuation_date`)."""
+    return _convert_currency(
+        _get_invoice_amount(inv),
+        inv.currency,
+        currency,
+        fx,
+        valuation_date(inv, as_of),
+    )
+
+
 def _is_active_ar(inv: Invoice, as_of: date) -> bool:
     """Determines if an invoice is issued on or before as_of and uncollected."""
     if inv.invoice_date > as_of:
@@ -127,8 +140,7 @@ def _build_active_record(
     fx: FXProvider | None,
 ) -> _ActiveInvoiceRecord:
     """Builds a normalized active AR record with converted amount and aging."""
-    raw_amount = _get_invoice_amount(inv)
-    converted_amount = _convert_currency(raw_amount, inv.currency, currency, fx, as_of)
+    converted_amount = _convert_invoice(inv, currency, fx, as_of)
     age_days = (as_of - inv.invoice_date).days
     dpd = _calculate_dpd(inv, as_of)
     bucket = _classify_aging_bucket(dpd)
@@ -178,21 +190,13 @@ def compute_weekly_snapshot(
         if _is_lookback_sale(inv, as_of_date, config.lookback_days)
     ]
     lookback_sales = sum(
-        (
-            _convert_currency(
-                _get_invoice_amount(inv), inv.currency, currency, fx, as_of_date
-            )
-            for inv in lookback_invoices
-        ),
+        (_convert_invoice(inv, currency, fx, as_of_date) for inv in lookback_invoices),
         start=Decimal("0"),
     )
 
     active_invoices = [inv for inv in invoices if _is_active_ar(inv, as_of_date)]
     all_active_amounts = [
-        _convert_currency(
-            _get_invoice_amount(inv), inv.currency, currency, fx, as_of_date
-        )
-        for inv in active_invoices
+        _convert_invoice(inv, currency, fx, as_of_date) for inv in active_invoices
     ]
     total_ar = sum(all_active_amounts, start=Decimal("0"))
 
@@ -354,9 +358,7 @@ def get_top_n_customers(
 
     for inv in invoices:
         if start_date <= inv.invoice_date <= end_date:
-            amount = _convert_currency(
-                _get_invoice_amount(inv), inv.currency, currency, fx, inv.invoice_date
-            )
+            amount = _convert_invoice(inv, currency, fx, end_date)
             if inv.client_name not in client_volumes:
                 client_volumes[inv.client_name] = ClientVolume(
                     client_name=inv.client_name
@@ -388,9 +390,7 @@ def _week_balances(
     for inv in invoices:
         if not _is_active_ar(inv, as_of):
             continue
-        amount = _convert_currency(
-            _get_invoice_amount(inv), inv.currency, currency, fx, as_of
-        )
+        amount = _convert_invoice(inv, currency, fx, as_of)
         week_balances.setdefault(
             inv.client_name, ClientVolume(client_name=inv.client_name)
         ).volume += amount
