@@ -16,6 +16,7 @@ from abl.importer import load_invoices_from_csv
 from abl.models import CertificateParams, CustomerPalette
 from abl.report import (
     _OTHER_LABEL,
+    _anchor_at_zero,
     _chart_start,
     _compact_currency,
     _customer_colors,
@@ -258,6 +259,15 @@ def test_week_edges_give_each_snapshot_a_whole_week() -> None:
     edges = _week_edges(dates)
     np.testing.assert_allclose(np.diff(edges), [7.0, 7.0, 7.0])
     assert edges[0] == pytest.approx(edges[1] - 7.0)
+
+
+@pytest.mark.parametrize("values", [[85.0, 90.0, 95.0], [3.0, 2.0, 1.0]])
+def test_anchor_at_zero_pins_y_origin(values: list[float]) -> None:
+    fig, ax = plt.subplots()
+    ax.plot(range(len(values)), values)
+    _anchor_at_zero(ax)
+    assert ax.get_ylim()[0] == 0
+    plt.close(fig)
 
 
 def test_chart_style_does_not_leak_into_global_matplotlib(tmp_path: Path) -> None:

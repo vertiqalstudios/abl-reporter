@@ -132,6 +132,11 @@ def _set_title_and_xlabel(ax: Axes, title: str) -> None:
     ax.set_xlabel("Collateral Week", fontsize=11, labelpad=10)
 
 
+def _anchor_at_zero(ax: Axes) -> None:
+    """Pins the y axis origin to zero so slopes aren't exaggerated."""
+    ax.set_ylim(bottom=0)
+
+
 def _format_week_axis(ax: Axes) -> None:
     """Formats the x axis as month and full year, angled so labels never collide."""
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -281,6 +286,7 @@ def generate_collateral_chart(
         ax.set_ylabel("Collateral Value CAD $", fontsize=11, labelpad=10)
         _format_week_axis(ax)
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
+        _anchor_at_zero(ax)
 
         order = ["Eligible Collateral", "Ineligible Collateral", avg_label]
         return _save_figure(fig, output_path, _legend_below(fig, ax, order=order))
@@ -331,6 +337,7 @@ def generate_dso_chart(
 
         _set_title_and_xlabel(ax, f"Vertiqal DSO Trends {get_chart_year_label(dates)}")
         ax.set_ylabel("Days Sales Outstanding", fontsize=11, labelpad=10)
+        _anchor_at_zero(ax)
         _format_week_axis(ax)
 
         return _save_figure(fig, output_path, _legend_below(fig, ax))
@@ -390,6 +397,7 @@ def generate_top_n_chart(
         ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
         _format_week_axis(ax)
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
+        _anchor_at_zero(ax)
 
         return _save_figure(fig, output_path, _legend_below(fig, ax))
 
@@ -433,6 +441,7 @@ def generate_customer_ar_chart(
         ax.set_ylabel("Open AR Balance CAD $", fontsize=11, labelpad=10)
         _format_week_axis(ax)
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(_currency_tick))
+        _anchor_at_zero(ax)
 
         return _save_figure(fig, output_path, _legend_below(fig, ax))
 
