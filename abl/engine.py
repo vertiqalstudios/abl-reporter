@@ -139,7 +139,7 @@ def evaluate_snapshot(
     Normalizes open invoices to CAD base currency, screens against covenants
     (contra accounts, maximum overdue aging, cross-default delinquency ratios),
     prorates debtor concentration excesses against the single-client threshold,
-    and calculates effective borrowing capacity net of dilution reserves.
+    and calculates effective borrowing capacity net of dilution and FX reserves.
     """
     week_dt = datetime.combine(snapshot_date, time(23, 59, 59))
     open_invoices = [
@@ -191,7 +191,10 @@ def evaluate_snapshot(
         (rec.ineligible_balance for rec in ineligible_records), Decimal("0.00")
     )
     net_borrow = calculate_net_availability(
-        total_eligible, criteria.advance_rate, criteria.dilution_reserve_pct
+        total_eligible,
+        criteria.advance_rate,
+        criteria.dilution_reserve_pct,
+        criteria.fx_reserve_pct,
     )
 
     return CollateralReport(

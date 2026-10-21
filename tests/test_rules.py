@@ -168,23 +168,30 @@ def test_calculate_concentration_cap(
 
 
 @pytest.mark.parametrize(
-    ("eligible_cad", "advance_rate", "dilution_reserve", "expected_borrow"),
+    ("eligible_cad", "advance_rate", "dilution", "fx", "expected_borrow"),
     [
-        (Decimal("200000.00"), Decimal("0.85"), Decimal("0.05"), Decimal("160000.00")),
-        (Decimal("100000.00"), Decimal("0.80"), Decimal("0.00"), Decimal("80000.00")),
-        (Decimal("100000.00"), Decimal("0.05"), Decimal("0.10"), Decimal("0.00")),
+        (Decimal("200000"), Decimal("0.85"), Decimal("0.05"), Decimal("0"), "160000"),
+        (Decimal("100000"), Decimal("0.80"), Decimal("0"), Decimal("0"), "80000"),
+        (Decimal("100000"), Decimal("0.05"), Decimal("0.10"), Decimal("0"), "0"),
+        (
+            Decimal("100000"),
+            Decimal("0.85"),
+            Decimal("0.025"),
+            Decimal("0.025"),
+            "80000",
+        ),
+        (Decimal("100000"), Decimal("0.05"), Decimal("0.03"), Decimal("0.03"), "0"),
     ],
 )
 def test_calculate_net_availability(
     eligible_cad: Decimal,
     advance_rate: Decimal,
-    dilution_reserve: Decimal,
-    expected_borrow: Decimal,
+    dilution: Decimal,
+    fx: Decimal,
+    expected_borrow: str,
 ) -> None:
-    assert (
-        calculate_net_availability(eligible_cad, advance_rate, dilution_reserve)
-        == expected_borrow
-    )
+    result = calculate_net_availability(eligible_cad, advance_rate, dilution, fx)
+    assert result == Decimal(expected_borrow).quantize(Decimal("0.01"))
 
 
 def test_summarize_ineligibles() -> None:

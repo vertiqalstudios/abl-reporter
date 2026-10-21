@@ -59,11 +59,13 @@ class LendingCriteria:
     cross_default_enabled: bool = True
     advance_rate: Decimal = Decimal("0.85")
     dilution_reserve_pct: Decimal = Decimal("0.05")
+    fx_reserve_pct: Decimal = Decimal("0.025")
     contra_clients: frozenset[str] = frozenset({"self"})
 
     @property
     def effective_advance_rate(self) -> Decimal:
-        return max(Decimal("0.00"), self.advance_rate - self.dilution_reserve_pct)
+        reserves = self.dilution_reserve_pct + self.fx_reserve_pct
+        return max(Decimal("0.00"), self.advance_rate - reserves)
 
 
 @dataclass(frozen=True, slots=True)

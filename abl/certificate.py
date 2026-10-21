@@ -648,6 +648,7 @@ def generate_certificate_pdf(
     # 2. RUNTIME PARAMETERS STRIP (Quiet, compact 4-cell horizontal bar)
     adv_pct = criteria.advance_rate * Decimal("100")
     dil_pct = criteria.dilution_reserve_pct * Decimal("100")
+    fx_pct = criteria.fx_reserve_pct * Decimal("100")
     eff_pct = criteria.effective_advance_rate * Decimal("100")
     conc_cap_pct = criteria.max_client_concentration_pct * Decimal("100")
 
@@ -659,8 +660,10 @@ def generate_certificate_pdf(
                 s_param_val,
             ),
             Paragraph(
-                f"<font color='{theme.muted}'>ADVANCE / DILUTION RATE</font><br/>"
-                f"<b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% = {eff_pct:.1f}% Eff.</b>",
+                f"<font color='{theme.muted}'>ADVANCE &minus; DILUTION &minus; FX"
+                "</font><br/>"
+                f"<b>{adv_pct:.1f}% &minus; {dil_pct:.1f}% &minus; {fx_pct:.1f}% "
+                f"= {eff_pct:.1f}% Eff.</b>",
                 s_param_val,
             ),
             Paragraph(

@@ -29,14 +29,14 @@ if __name__ == "__main__":
     default_settings = ReportSettings(
         criteria=LendingCriteria(
             max_client_concentration_pct=Decimal("0.30"),
-            max_overdue_days=180,
+            max_overdue_days=90,
             taint_past_due_days=90,
             taint_threshold_pct=Decimal("0.50"),
             cross_default_enabled=True,
             advance_rate=Decimal("0.85"),  # % of Collateral Borrow-able against
-            dilution_reserve_pct=Decimal(
-                "0.05"
-            ),  # Advance Rate - Dilution Rate = Eff Advance Rate
+            dilution_reserve_pct=Decimal("0.025"),  # Dilution cushion
+            fx_reserve_pct=Decimal("0.025"),  # CADUSD volatility cushion, flat
+            # Advance - Dilution - FX = Eff Advance Rate
             contra_clients=frozenset(
                 {"self"}
             ),  # Names of "Self" debtors - eg Vertiqal, Gamelancer

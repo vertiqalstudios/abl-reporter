@@ -93,9 +93,10 @@ def calculate_net_availability(
     eligible_cad: Decimal,
     advance_rate: Decimal,
     dilution_reserve: Decimal,
+    fx_reserve: Decimal,
 ) -> Decimal:
-    """Applies advance rate net of dilution reserve to eligible collateral."""
-    effective_rate = max(Decimal("0.00"), advance_rate - dilution_reserve)
+    """Applies advance rate net of dilution and FX reserves to eligible collateral."""
+    effective_rate = max(Decimal("0.00"), advance_rate - dilution_reserve - fx_reserve)
     return (eligible_cad * effective_rate).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )

@@ -8,7 +8,7 @@ from abl.models import IneligibilityReason, Invoice, LendingCriteria
 
 def test_full_pipeline_reconciliation() -> None:
     fx = make_fixed_fx_provider(Decimal("1.44"))
-    criteria = LendingCriteria()
+    criteria = LendingCriteria(fx_reserve_pct=Decimal("0.00"))
     snapshot_date = date(2025, 2, 7)
 
     invoices = [
