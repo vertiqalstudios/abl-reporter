@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.lib import colors
@@ -144,7 +145,8 @@ def _currency_sort_key(breakdown: CurrencyBreakdown) -> tuple[int, str]:
 def _currency_label(code: str) -> str:
     """Returns the bolded currency code with a descriptive suffix where known."""
     suffix = _CURRENCY_LABELS.get(code)
-    return f"<b>{code}</b> ({suffix})" if suffix else f"<b>{code}</b>"
+    label = f"<b>{escape(code)}</b>"
+    return f"{label} ({suffix})" if suffix else label
 
 
 def _single_currency_breakdown(
@@ -751,7 +753,7 @@ def _render_certificate(
     ledger_data = [
         [
             Paragraph("<b>Collateral Line Item</b>", s_bold),
-            Paragraph(f"<b>Amount ({params.currency})</b>", s_right_bold),
+            Paragraph(f"<b>Amount ({escape(params.currency)})</b>", s_right_bold),
         ],
         [
             Paragraph("<b>Gross Accounts Receivable Balance</b>", s_bold),
@@ -940,7 +942,7 @@ def _render_certificate(
     display_list = _display_concentrations(concentrations, report.gross_amount_cad)
     conc_rows.extend(
         [
-            Paragraph(f"&bull;&nbsp;{item.client_name}", s_body),
+            Paragraph(f"&bull;&nbsp;{escape(item.client_name)}", s_body),
             Paragraph(f"${item.balance_cad:,.0f}", s_right),
             Paragraph(f"{item.share_pct * 100:.1f}%", s_right),
             Paragraph(
@@ -1047,7 +1049,7 @@ def _render_certificate(
         Paragraph("<b>2. ORIGINAL CURRENCY BREAKDOWN (USD / CAD)</b>", s_h2),
         curr_table,
         Paragraph(
-            fx_note,
+            escape(fx_note),
             ParagraphStyle(
                 "FXNote", parent=s_body, fontSize=6, leading=7.5, textColor=c_muted
             ),
@@ -1147,7 +1149,7 @@ def _render_certificate(
             ),
         ],
         [
-            Paragraph(params.disclaimer.upper(), s_disclaimer),
+            Paragraph(escape(params.disclaimer.upper()), s_disclaimer),
             Paragraph("", s_disclaimer),
         ],
     ]

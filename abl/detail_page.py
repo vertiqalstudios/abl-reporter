@@ -131,7 +131,7 @@ def _invoice_row(line: InvoiceLine, st: _Styles) -> list[Paragraph]:
         Paragraph(escape(line.invoice_id or "-"), st.cell),
         Paragraph(issued, st.cell),
         Paragraph(f"{line.due_date:%Y-%m-%d}{late}", st.cell),
-        Paragraph(f"{line.currency} {_money(line.face_amount)}", st.right),
+        Paragraph(f"{escape(line.currency)} {_money(line.face_amount)}", st.right),
         Paragraph(_money(line.gross_cad), st.right),
         Paragraph(_money(line.eligible_cad), st.right),
         Paragraph(_status_text(line), st.status[line.status]),
@@ -225,7 +225,7 @@ def _settled_table(
             Paragraph(escape(s.client_name), st.cell),
             Paragraph(escape(s.invoice_id or "-"), st.cell),
             Paragraph(f"{s.paid_date:%Y-%m-%d}", st.cell),
-            Paragraph(f"{s.currency} {_money(s.face_amount)}", st.right),
+            Paragraph(f"{escape(s.currency)} {_money(s.face_amount)}", st.right),
             Paragraph(f"{s.fx_rate:.4f}", st.right),
             Paragraph(_money(s.cad_amount), st.right),
         ]
