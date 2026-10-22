@@ -5,7 +5,9 @@ import pytest
 
 from abl.models import (
     CustomerPalette,
+    InvoiceLine,
     LendingCriteria,
+    LineStatus,
     ReportPalette,
     ReportSettings,
     end_of_week,
@@ -82,3 +84,21 @@ def test_defaults_match_the_working_settings() -> None:
     assert settings.criteria.dilution_reserve_pct == Decimal("0.025")
     assert settings.criteria.effective_advance_rate == Decimal("0.800")
     assert settings.chart_weeks == 52
+
+
+def test_haircut_pct_is_zero_for_a_zero_gross_line() -> None:
+    line = InvoiceLine(
+        client_name="A",
+        invoice_id="",
+        invoice_date=date(2026, 3, 1),
+        due_date=date(2026, 4, 1),
+        days_past_due=0,
+        currency="CAD",
+        face_amount=Decimal("0"),
+        fx_rate=Decimal("1"),
+        gross_cad=Decimal("0.00"),
+        eligible_cad=Decimal("0.00"),
+        ineligible_cad=Decimal("0.00"),
+        status=LineStatus.ELIGIBLE,
+    )
+    assert line.haircut_pct == Decimal("0")

@@ -1,5 +1,6 @@
 import io
 import re
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -24,7 +25,11 @@ from abl.report import (
     _row_major,
     _stream_bounds,
     _week_edges,
+    generate_collateral_chart,
+    generate_customer_ar_chart,
+    generate_customer_stream_chart,
     generate_dso_chart,
+    generate_top_n_chart,
 )
 from abl.timeseries import compute_weekly_dso
 
@@ -296,3 +301,40 @@ def test_pack_survives_a_failed_rate_fetch(tmp_path: Path) -> None:
         )
     )
     assert outputs["certificate"].exists()
+
+
+def _placeholder_only() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "as_of_date": [date(2026, 1, 5)],
+            "client_name": ["NONE"],
+            "balance": [0.0],
+            "is_top_n": [False],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "chart",
+    [
+        lambda df, path: generate_top_n_chart(df, 3, path),
+        lambda df, path: generate_customer_ar_chart(df, path),
+        lambda df, path: generate_customer_stream_chart(df, path),
+    ],
+)
+def test_customer_charts_skip_when_there_is_no_customer_data(
+    chart: Callable[[pd.DataFrame, Path], Path | None],
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "chart.png"
+    assert chart(_placeholder_only(), target) is None
+    assert not target.exists()
+
+
+def test_dso_chart_skips_when_there_is_no_data(tmp_path: Path) -> None:
+    assert generate_dso_chart([], tmp_path / "dso.png") is None
+
+
+def test_collateral_chart_rejects_a_wrong_schema(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Schema mismatch"):
+        generate_collateral_chart(pd.DataFrame({"week": []}), tmp_path / "c.png")

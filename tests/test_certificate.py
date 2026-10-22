@@ -10,6 +10,8 @@ from abl.bbc import generate_bbc
 from abl.certificate import (
     _Ink,
     _readable_label_color,
+    _register_font,
+    _share_of,
     calculate_currency_breakdown,
     calculate_debtor_concentrations,
     capped_client_names,
@@ -434,3 +436,27 @@ def test_eligible_share_uses_pre_cap_eligible_pool(
         "A": (Decimal("0.2500"), Decimal("0.5000")),
         "B": (Decimal("0.2500"), Decimal("0.5000")),
     }
+
+
+def test_generate_certificate_rejects_an_empty_book(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="No invoices available"):
+        generate_certificate(ReportSettings(output_dir=tmp_path), invoices=[])
+
+
+@pytest.mark.parametrize(
+    ("part", "total", "expected"),
+    [
+        (Decimal("1"), Decimal("4"), Decimal("0.2500")),
+        (Decimal("1"), Decimal("0"), Decimal("0.0000")),
+        (Decimal("1"), Decimal("-5"), Decimal("0.0000")),
+    ],
+)
+def test_share_of_guards_a_non_positive_total(
+    part: Decimal, total: Decimal, expected: Decimal
+) -> None:
+    assert _share_of(part, total) == expected
+
+
+def test_missing_system_font_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("abl.certificate._find_font_file", lambda pattern: None)
+    assert _register_font("NoSuchFace", "nosuch", "Helvetica") == "Helvetica"
