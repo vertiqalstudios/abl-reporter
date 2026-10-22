@@ -75,6 +75,9 @@ def test_is_invoice_open(
             frozenset({"self", "affiliate"}),
             IneligibilityReason.CONTRA_ACCOUNT,
         ),
+        # Configured names need not be lowercase or tidy
+        ("Vertiqal", frozenset({"Vertiqal"}), IneligibilityReason.CONTRA_ACCOUNT),
+        ("vertiqal", frozenset({" VERTIQAL "}), IneligibilityReason.CONTRA_ACCOUNT),
         ("ThirdParty Inc", frozenset({"self", "affiliate"}), None),
         ("", frozenset({"self"}), None),
     ],

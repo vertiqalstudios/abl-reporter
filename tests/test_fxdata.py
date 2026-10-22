@@ -51,6 +51,33 @@ def test_parse_boc_observations_rejects_bad_payloads(body: bytes) -> None:
         parse_boc_observations(body)
 
 
+@pytest.mark.parametrize("bad_value", ["", "  ", "0", "0.0000", "-1.4"])
+def test_parse_boc_observations_skips_unusable_rates(
+    bad_value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    body = _payload({"2026-10-20": "1.3950", "2026-10-21": bad_value})
+    with caplog.at_level(logging.WARNING, logger="abl.fxdata"):
+        parsed = parse_boc_observations(body)
+    assert parsed == {date(2026, 10, 20): Decimal("1.3950")}
+    assert "2026-10-21" in caplog.text
+
+
+def test_parse_boc_observations_rejects_non_numeric_rates() -> None:
+    with pytest.raises(FXDataError, match="Unexpected Bank of Canada response"):
+        parse_boc_observations(_payload({"2026-10-20": "n/a"}))
+
+
+def test_load_fx_market_survives_a_blank_day_in_the_payload() -> None:
+    rows = {str(FRIDAY - timedelta(days=i)): "1.4000" for i in range(60)}
+    rows[str(FRIDAY - timedelta(days=3))] = ""
+    market = load_fx_market(
+        lambda start, end: parse_boc_observations(_payload(rows)),
+        FRIDAY - timedelta(days=20),
+        FRIDAY,
+    )
+    assert market.provider.source == BOC_SOURCE
+
+
 def test_fetch_wraps_network_errors_and_logs_the_url(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -109,6 +136,19 @@ def test_alternating_rates_give_known_volatility() -> None:
     rates = ["1.40", "1.4140"] * 15 + ["1.40"]
     vol = realized_volatility(_series(rates), FRIDAY)
     assert 0.15 < vol.annualized < 0.17
+
+
+def test_non_positive_rate_raises_fx_data_error() -> None:
+    rates = ["1.40"] * 15 + ["0"] + ["1.40"] * 15
+    with pytest.raises(FXDataError, match="Non-positive"):
+        realized_volatility(_series(rates), FRIDAY)
+
+
+def test_load_fx_market_keeps_live_rates_when_a_rate_is_zero() -> None:
+    rates = ["1.40"] * 15 + ["0"] + ["1.40"] * 15
+    market = load_fx_market(lambda start, end: _series(rates), FRIDAY, FRIDAY)
+    assert market.provider.source == BOC_SOURCE
+    assert market.volatility is None
 
 
 def test_thin_window_raises() -> None:
