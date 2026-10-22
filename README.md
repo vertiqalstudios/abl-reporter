@@ -9,7 +9,7 @@ Written for Python 3.14. May be backwards compatible, but honestly - doesn't nee
 Copyright (c) 2026 Vertiqal Studios Corporation & Columbia Westminster Pte Ltd. All Rights Reserved.
 
 ## Generating the report
-Install once, then run from the directory that holds your invoice CSV:
+Install once, then run from the directory the CSV paths in your settings are relative to:
 
 ```bash
 uv venv --python 3.14
@@ -17,10 +17,32 @@ uv pip install -e .
 uv run abl-report        # or: uv run python -m abl
 ```
 
-This reads `invoices.csv` and writes the Borrowing Base Certificate PDF
-(`bbc_certificate.pdf`) and all five charts to `output/`, printing each path. The CSV
-needs the columns `Client Name, Invoice Date, Due Date, Invoice Amount, Currency,
-Invoice Paid Date`. There are no command-line flags; a missing CSV exits with a "CSV file not found" message.
+This reads the invoice CSV, fetches live USD/CAD rates, and writes the Borrowing Base
+Certificate PDF (`bbc_certificate.pdf`) and five charts to `output/`, printing each path.
+There are no command-line flags: `abl-report` takes every option from
+`build_default_settings()` in `abl/__main__.py`, so **edit that function to change what
+the command does** (input file, covenants, reserves, certificate status and loan figures,
+colours). Its current defaults read `invoices_real_2.csv` and fetch live rates. To run with
+different settings without editing it, see [Custom settings](#custom-settings).
+
+The CSV needs the columns `Client Name, Invoice Date, Due Date, Invoice Amount, Currency,
+Invoice Paid Date`, with dates as `YYYY-MM-DD`; an `Invoice Key` column is optional.
+A missing CSV exits with a "CSV file not found" message, and a currency other than CAD or
+USD exits with an `FXConversionError` naming the invoice.
+
+What goes in and out, and the order things happen in, is diagrammed in
+[design/system_flow.md](design/system_flow.md).
+
+### Outputs
+| File | Contents |
+| --- | --- |
+| `output/bbc_certificate.pdf` | Page 1 certificate; page 2 onward invoice detail |
+| `output/collateral_chart.png` | Weekly eligible vs ineligible collateral |
+| `output/dso_chart.png` | Weekly equal- and dollar-weighted DSO |
+| `output/top_n_chart.png` | Open AR, top N customers vs the rest |
+| `output/customer_ar_chart.png` | Open AR stacked by customer |
+| `output/customer_ar_stream_chart.png` | Open AR by customer as a stream |
+| `output/abl.log` | Full detail of the run, rewritten each time |
 
 ### As-of date
 One as-of date drives the certificate and every chart. It defaults to the **Friday of
@@ -53,11 +75,48 @@ settings = ReportSettings(
 outputs = generate_report_pack(settings)  # {"certificate": ..., "collateral": ..., ...}
 ```
 
-`ReportSettings` also takes `top_n_customers` (default 10) and `criteria` (`LendingCriteria`: advance rate, concentration
-cap, taint rules), `palette`, `customer_palette` (`CustomerPalette`: chart colours for
-the largest customers by rank, separate from the certificate's `ReportPalette`) and `fx`
-(an `FXProvider`; defaults to a pinned 1 USD = 1.44 CAD). To print
-the paths as the command does, pass the same object to `abl.__main__.main(settings)`.
+To print the paths and write the log as the command does, pass the same object to
+`abl.__main__.main(settings)`. A bare `ReportSettings()` differs from the command in two
+ways: it reads `invoices.csv`, and it prices at the pinned 1.44 unless you set `fx_fetcher`
+(the command sets `fx_fetcher=fetch_usd_cad_series` for live rates).
+
+### Configuration reference
+`ReportSettings` (all fields optional):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `input_source` | `invoices.csv` | CSV path, CSV text, or an open text stream |
+| `output_dir` | `output` | Where the PDF, charts and log go |
+| `as_of` | Friday of the current week | Date for the certificate and the last chart point |
+| `chart_weeks` | `52` | Weeks of chart history (1 year); older invoices still feed AR, DSO and taint |
+| `top_n_customers` | `10` | Customers ranked and tagged in the Top N charts |
+| `fx_fetcher` | `None` | Live USD/CAD source (`fetch_usd_cad_series`); `None` keeps the pinned rate |
+| `fx` | `None` | An explicit `FXProvider`; wins over `fx_fetcher` |
+| `criteria` | see below | Covenants and reserves |
+| `certificate` | see below | Status and loan figures printed on the certificate |
+| `palette` | slate and blue | Certificate and chart colours (`ReportPalette`) |
+| `customer_palette` | 7 hues + Other | Ranked customer colours in the charts (`CustomerPalette`) |
+
+`LendingCriteria`:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `advance_rate` | `0.85` | Share of eligible collateral that can be borrowed against |
+| `dilution_reserve_pct` | `0.025` | Reserve deducted from the advance rate |
+| `fx_reserve_pct` | `0.025` | Flat USD/CAD cushion deducted from the advance rate |
+| `max_client_concentration_pct` | `0.30` | Cap on one debtor's share of eligible collateral |
+| `max_overdue_days` | `90` | Invoices more than this many days past due are ineligible |
+| `taint_past_due_days` | `90` | Age at which a debtor's balance counts toward taint |
+| `taint_threshold_pct` | `0.50` | Debtor share past due that taints all its invoices |
+| `cross_default_enabled` | `True` | Switch the taint rule on or off |
+| `contra_clients` | `{"self"}` | Debtor names that are affiliates (case-insensitive) |
+
+The effective advance rate is `advance_rate - dilution_reserve_pct - fx_reserve_pct`
+(80% by default).
+
+`CertificateParams`: `status` (`PRO_FORMA` default, `DRAFT`, `CERTIFIED`), `existing_borrow`
+(outstanding loan, default 0), `facility_limit` (default 2,000,000), `currency` (`CAD`),
+`disclaimer`, and `generated_at` (the run timestamp).
 
 ### FX pricing and volatility
 Receivables are priced at **spot on the report date**: each weekly snapshot (and the
