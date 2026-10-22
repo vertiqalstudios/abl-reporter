@@ -1,0 +1,32 @@
+// Order of work in generate_report_pack, called by main().
+digraph run_sequence {
+  rankdir=TB;
+  graph [fontname="Helvetica", fontsize=11, pad=0.2, nodesep=0.35, ranksep=0.45, bgcolor="white"];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B", fontcolor="#0F172A", margin="0.14,0.08"];
+  edge [fontname="Helvetica", fontsize=9, color="#64748B", fontcolor="#334155", arrowsize=0.7];
+
+  main    [label="main(settings)\n__main__.py"];
+  logcfg  [label="configure_logging\noutput/abl.log"];
+  pack    [label="generate_report_pack\npack.py"];
+  load    [label="load_invoices_from_csv  (importer.py)\nparse rows; floor paid-before-issued;\nalert due-before-issued; warn on duplicate keys"];
+  cur     [label="require_supported_currencies\nCAD and USD only, else FXConversionError"];
+  asof    [label="resolve as-of date\nsettings.as_of, else this week's Friday"];
+  haveFx  [label="explicit settings.fx?", shape=diamond, style=filled, fillcolor="#FEF3C7", color="#B45309"];
+  useFx   [label="use it"];
+  market  [label="load_fx_market  (fxdata.py)\nlive Bank of Canada series,\nor the pinned rate on any failure"];
+  note    [label="format_fx_note\nspot, source, fixing date,\n30-day realised volatility"];
+  cert    [label="generate_certificate\ncertificate.py", fillcolor="#DBEAFE", color="#2563EB"];
+  charts  [label="generate_all_reports\nreport.py", fillcolor="#DBEAFE", color="#2563EB"];
+  pdf     [label="bbc_certificate.pdf", shape=note, fillcolor="white"];
+  pngs    [label="5 chart PNGs", shape=note, fillcolor="white"];
+
+  main -> logcfg -> pack -> load -> cur -> asof -> haveFx;
+  haveFx -> useFx [label="yes"];
+  haveFx -> market [label="no"];
+  useFx -> note;
+  market -> note;
+  note -> cert;
+  note -> charts;
+  cert -> pdf;
+  charts -> pngs;
+}

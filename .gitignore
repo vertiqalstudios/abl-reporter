@@ -45,3 +45,5 @@ uv.lock
 # Run logs
 *.log
 .coverage
+design/build/
+!design/diagrams/*.svg
