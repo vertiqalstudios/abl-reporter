@@ -111,3 +111,20 @@ Alpha Inc,2025-01-10,2025-02-10
 """
     with pytest.raises(KeyError, match="Missing required CSV column"):
         load_invoices_from_csv(io.StringIO(csv_content))
+
+
+@pytest.mark.parametrize(
+    ("extra", "expected"),
+    [({}, ""), ({"Invoice Key": " 100499 "}, "100499"), ({"Invoice Key": ""}, "")],
+)
+def test_invoice_key_is_optional(extra: dict[str, str], expected: str) -> None:
+    row = {
+        "Client Name": "Acme Corp",
+        "Invoice Date": "2025-01-15",
+        "Due Date": "2025-02-15",
+        "Invoice Amount": "100",
+        "Currency": "CAD",
+        "Invoice Paid Date": "",
+        **extra,
+    }
+    assert parse_invoice_row(row, 2).invoice_id == expected

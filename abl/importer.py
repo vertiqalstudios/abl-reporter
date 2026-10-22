@@ -81,7 +81,7 @@ def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
         invoice_amount=invoice_amount,
         currency=currency,
         paid_date=paid_date,
-        invoice_id="",
+        invoice_id=(row.get("Invoice Key") or "").strip(),
     )
 
 
