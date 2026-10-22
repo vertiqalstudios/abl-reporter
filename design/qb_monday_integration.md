@@ -174,9 +174,39 @@ scratchpad and is not committed.
 - **PDF:** `GET invoice/{id}/pdf` with `Accept: application/pdf` returned a valid PDF
   (18 KB). Confirmed; an audit exhibit only.
 - **Change data capture:** the endpoint answers; nothing had changed in 30 days here.
-- **Not yet seen:** a foreign-currency invoice (so `ExchangeRate` other than 1), a credit
-  memo, a void, a deletion, and a payment deposited through Undeposited Funds. Creating
-  these in the sandbox needs write calls, which need your OK.
+### 5b. Scenarios created in the sandbox (all labelled `ABL-TEST`)
+
+Written through the API to the sandbox only, then read back. Two test customers: a USD
+agency (id 67) and a CAD agency (id 68). Invoices `ABL-T01` to `ABL-T07`:
+
+| Case | What the API shows |
+| --- | --- |
+| USD invoice, unpaid (`T01`, USD 10,000) | `ExchangeRate` 1.422293 (the rate on the invoice date), `HomeTotalAmt` 14,222.93, `Balance` 10,000 in USD, `HomeBalance` 14,222.93 |
+| USD part-paid (`T02`, USD 5,000, paid USD 2,000) | `Balance` 3,000 USD, `HomeBalance` 4,275.88, which is the balance at the **invoice** rate. The payment carries its own rate (1.42199) |
+| USD fully paid, never deposited (`T04`) | `Balance` 0. The payment sits in Undeposited Funds and has **no link to any deposit** |
+| CAD fully paid and deposited (`T03`) | The payment's `LinkedTxn` lists a `Deposit` (id 194, dated 2026-10-12), so payment date and deposit date are both recoverable |
+| Credit memo applied (`T05` CAD 1,500, credit memo 400) | Applied by a payment with `TotalAmt` 0 whose lines link the invoice and the credit memo. Invoice `Balance` falls to 1,100 and its `LinkedTxn` shows that zero-dollar payment. The credit memo shows `Balance` 0 and **no link back** |
+| Voided invoice (`T06`) | Still returned. `TotalAmt` and `Balance` become 0 and `PrivateNote` becomes "Voided - ..." |
+| Deleted invoice (`T07`) | **Not returned** by a query. It appears only in change data capture with `status: Deleted` |
+
+What this means for the extractor and the database:
+
+1. **FX:** QuickBooks fixes the CAD value at the booking rate and keeps `Balance` in the
+   invoice currency. The database should store the face amount, currency and exchange rate
+   as booked. Our reporter still values open USD at spot on the as-of date and ignores
+   QuickBooks' home amounts, though they are useful to reconcile against.
+2. **Paid date and deposit date:** for each invoice, find the linked payments. The payment
+   date is `Payment.TxnDate`. The deposit date is the `TxnDate` of the `Deposit` in that
+   payment's `LinkedTxn`, if any; a payment still in Undeposited Funds has none yet.
+3. **Credit memos:** read the zero-dollar payment's lines to see which credit memo was
+   applied. A zero-dollar payment is not cash, so it must not set a payment date.
+4. **Voids:** keep the row and flag it as void; exclude it from receivables.
+5. **Deletions:** a deleted invoice cannot be found by querying. We must run change data
+   capture at least every 30 days (daily is planned), and also treat any id present in our
+   raw tables but missing from a full re-pull as deleted.
+
+Still unconfirmed: whether real books use Undeposited Funds and batch deposits as in this
+test, how customer hierarchies (sub-customers or jobs) look, and a purchase order field.
 
 ## 6. Intuit sandbox: what you need to do, then what I will do
 
