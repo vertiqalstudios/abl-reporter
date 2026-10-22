@@ -81,6 +81,19 @@ rate, labelled "Pinned 1.4400, live unavailable" on the certificate with volatil
 `output/abl.log` holds the detail (URL, timing, error, response snippet); warnings also go
 to stderr.
 
+### Invoice detail pages
+Page 2 onward of the certificate is an audit log of the gross collateral: every invoice
+open at the as-of date, in two columns grouped by debtor (A-Z, then issue date). Each row
+shows the invoice id, issue and due dates (days past due), face amount as booked, gross
+and eligible CAD, and a status of Eligible, Haircut n% or Ineligible. Ineligible and
+haircut rows say why beneath (the aged limit, the debtor's overdue ratio against the
+taint threshold, or its share of eligible against the concentration cap). An invoice shows
+the first covenant it fails (contra, aged, then taint). A header strip reconciles gross,
+ineligible and eligible to page 1; invoices issued this week are starred, and invoices
+settled this week are listed at their settlement-date rate.
+
+The CSV's optional `Invoice Key` column becomes the invoice id shown here.
+
 ## Running Tests
 ```bash
 uv run pytest
