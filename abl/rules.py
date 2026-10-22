@@ -57,6 +57,23 @@ def _client_exposure(
     return client_totals, client_overdue
 
 
+def client_taint_ratios(
+    invoices: Sequence[Invoice],
+    as_of: date,
+    taint_days: int,
+    contra_clients: frozenset[str],
+) -> dict[str, Decimal]:
+    """Returns each non-contra debtor's share of balance past taint_days."""
+    client_totals, client_overdue = _client_exposure(
+        invoices, as_of, taint_days, contra_clients
+    )
+    return {
+        client: client_overdue[client] / total
+        for client, total in client_totals.items()
+        if total > Decimal("0.00")
+    }
+
+
 def find_tainted_clients(
     invoices: Sequence[Invoice],
     as_of: date,
@@ -65,14 +82,8 @@ def find_tainted_clients(
     contra_clients: frozenset[str],
 ) -> set[str]:
     """Identifies debtors where delinquency ratio meets or exceeds threshold."""
-    client_totals, client_overdue = _client_exposure(
-        invoices, as_of, taint_days, contra_clients
-    )
-    return {
-        client
-        for client, total in client_totals.items()
-        if total > Decimal("0.00") and client_overdue[client] / total >= threshold_pct
-    }
+    ratios = client_taint_ratios(invoices, as_of, taint_days, contra_clients)
+    return {client for client, ratio in ratios.items() if ratio >= threshold_pct}
 
 
 def check_cross_default(

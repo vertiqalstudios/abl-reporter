@@ -50,6 +50,43 @@ class InvoiceWithReason(Invoice):
     reason_detail: str = ""
 
 
+class LineStatus(StrEnum):
+    ELIGIBLE = "ELIGIBLE"
+    HAIRCUT = "HAIRCUT"
+    INELIGIBLE = "INELIGIBLE"
+
+
+@dataclass(frozen=True, slots=True)
+class InvoiceLine:
+    """One open invoice and how it fared: the audit row behind the gross collateral.
+
+    Amounts are CAD at the invoice's valuation-date rate; `face_amount` is as booked.
+    """
+
+    client_name: str
+    invoice_id: str
+    invoice_date: date
+    due_date: date
+    days_past_due: int
+    currency: str
+    face_amount: Decimal
+    fx_rate: Decimal
+    gross_cad: Decimal
+    eligible_cad: Decimal
+    ineligible_cad: Decimal
+    status: LineStatus
+    reason: IneligibilityReason | None = None
+    detail: str = ""
+    is_new: bool = False  # issued within the snapshot week
+
+    @property
+    def haircut_pct(self) -> Decimal:
+        """Share of the invoice kept out of the borrowing base (0 to 1)."""
+        if self.gross_cad == Decimal("0.00"):
+            return Decimal("0")
+        return self.ineligible_cad / self.gross_cad
+
+
 @dataclass(frozen=True, slots=True)
 class LendingCriteria:
     max_client_concentration_pct: Decimal = Decimal("0.30")
@@ -79,6 +116,7 @@ class CollateralReport:
     ineligible_summary: IneligibilitySummary = field(
         default_factory=IneligibilitySummary
     )
+    lines: tuple[InvoiceLine, ...] = ()
 
     @property
     def gross_amount_cad(self) -> Decimal:
