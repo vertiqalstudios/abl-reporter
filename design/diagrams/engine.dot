@@ -1,0 +1,26 @@
+// What evaluate_snapshot does to the invoices at one as-of date.
+digraph engine {
+  rankdir=TB;
+  graph [fontname="Helvetica", fontsize=11, pad=0.2, nodesep=0.35, ranksep=0.45, bgcolor="white"];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B", fontcolor="#0F172A", margin="0.14,0.08"];
+  edge [fontname="Helvetica", fontsize=9, color="#64748B", fontcolor="#334155", arrowsize=0.7];
+
+  all    [label="all invoices"];
+  open   [label="keep invoices open at as-of\nissued, and not yet paid"];
+  price  [label="price in CAD\nspot at as-of; settlement date if paid"];
+  neg    [label="negative amount?", shape=diamond, style=filled, fillcolor="#FEF3C7", color="#B45309"];
+  screen [label="screen; the first failure wins\n1 contra account\n2 aged past max_overdue_days\n3 cross-default taint"];
+  inel   [label="ineligible at full value", fillcolor="#FEE2E2", color="#DC2626"];
+  cap    [label="concentration cap\na debtor over its share of eligible\nis prorated; the excess is ineligible"];
+  elig   [label="eligible collateral"];
+  credit [label="less credit notes at full face\nfloored at zero"];
+  adv    [label="x (advance rate - dilution - FX reserve)"];
+  net    [label="net available borrow", fillcolor="#DBEAFE", color="#2563EB", penwidth=1.4];
+
+  all -> open -> price -> neg;
+  neg -> screen [label="invoice"];
+  neg -> credit [label="credit note"];
+  screen -> inel [label="fails"];
+  screen -> cap [label="passes"];
+  cap -> elig -> credit -> adv -> net;
+}

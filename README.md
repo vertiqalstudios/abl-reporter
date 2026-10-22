@@ -168,6 +168,17 @@ The importer and engine handle awkward rows as follows (details in `output/abl.l
 - **Currencies** other than CAD and USD stop the run with an `FXConversionError` naming
   the invoice.
 
+## Design docs
+`design/` holds the certificate design and the system flow. To rebuild the diagrams (SVG,
+committed) and print-ready PDFs (`design/build/`, not committed):
+
+```bash
+uv run python design/render.py
+```
+
+This needs `dot` (Graphviz), `pandoc` and `xelatex` installed; the script says which is
+missing. Edit the diagrams in `design/diagrams/*.dot`.
+
 ## Running Tests
 ```bash
 uv run pytest

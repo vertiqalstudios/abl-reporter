@@ -1,0 +1,18 @@
+// How the certificate PDF is assembled.
+digraph certificate_branch {
+  rankdir=TB;
+  graph [fontname="Helvetica", fontsize=11, pad=0.2, nodesep=0.35, ranksep=0.45, bgcolor="white"];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B", fontcolor="#0F172A", margin="0.14,0.08"];
+  edge [fontname="Helvetica", fontsize=9, color="#64748B", fontcolor="#334155", arrowsize=0.7];
+
+  eval   [label="generate_bbc -> evaluate_snapshot\nengine.py"];
+  report [label="CollateralReport\ntotals plus one InvoiceLine\nper open invoice"];
+  extras [label="calculate_debtor_concentrations\ncalculate_currency_breakdown\nsettled_in_week"];
+  detail [label="detail_page.py\ntwo-column invoice log"];
+  pdf    [label="generate_certificate_pdf\ntwo passes: the first counts pages,\nthe second prints Page n of N", fillcolor="#DBEAFE", color="#2563EB"];
+
+  eval -> report;
+  report -> pdf;
+  report -> detail -> pdf;
+  extras -> pdf;
+}

@@ -1,0 +1,24 @@
+// How the five charts are produced.
+digraph chart_branch {
+  rankdir=TB;
+  graph [fontname="Helvetica", fontsize=11, pad=0.2, nodesep=0.35, ranksep=0.45, bgcolor="white"];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B", fontcolor="#0F172A", margin="0.14,0.08"];
+  edge [fontname="Helvetica", fontsize=9, color="#64748B", fontcolor="#334155", arrowsize=0.7];
+
+  window [label="chart window\nchart_weeks of Fridays, or since\nthe first invoice if shorter"];
+  coll   [label="run_collateral_report\nweekly evaluate_snapshot"];
+  dso    [label="compute_weekly_dso\ntimeseries.py"];
+  ar     [label="customer_ar_balances\nTop N by open balance"];
+  c1 [label="collateral_chart", shape=note, fillcolor="white"];
+  c2 [label="dso_chart", shape=note, fillcolor="white"];
+  c3 [label="top_n_chart", shape=note, fillcolor="white"];
+  c4 [label="customer_ar_chart", shape=note, fillcolor="white"];
+  c5 [label="customer_ar_stream_chart", shape=note, fillcolor="white"];
+
+  window -> coll -> c1;
+  window -> dso -> c2;
+  window -> ar;
+  ar -> c3;
+  ar -> c4;
+  ar -> c5;
+}

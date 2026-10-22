@@ -1,0 +1,24 @@
+// What goes into and comes out of one run of abl-report.
+digraph inputs_outputs {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, pad=0.2, nodesep=0.35, ranksep=0.45, bgcolor="white"];
+  node [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#F8FAFC", color="#64748B", fontcolor="#0F172A", margin="0.14,0.08"];
+  edge [fontname="Helvetica", fontsize=9, color="#64748B", fontcolor="#334155", arrowsize=0.7];
+
+  csv   [label="Invoice CSV\n(input_source)", shape=parallelogram, fillcolor="#E2E8F0"];
+  boc   [label="Bank of Canada Valet API\nseries FXUSDCAD (network)", shape=parallelogram, fillcolor="#E2E8F0"];
+  cfg   [label="ReportSettings\ncovenants, reserves, as_of,\npalettes, chart_weeks,\ntop_n_customers, certificate", shape=parallelogram, fillcolor="#E2E8F0"];
+  run   [label="abl-report\npython -m abl", fillcolor="#DBEAFE", color="#2563EB", penwidth=1.4];
+  pdf   [label="output/bbc_certificate.pdf\npage 1 certificate,\npage 2+ invoice detail", shape=note, fillcolor="white"];
+  pngs  [label="output/*.png\ncollateral, dso, top_n,\ncustomer_ar, customer_ar_stream", shape=note, fillcolor="white"];
+  log   [label="output/abl.log\nDEBUG detail", shape=note, fillcolor="white"];
+  term  [label="Terminal\npaths on stdout,\nwarnings on stderr", shape=note, fillcolor="white"];
+
+  csv -> run;
+  boc -> run [style=dashed, label="optional;\nfalls back to\npinned 1.44"];
+  cfg -> run;
+  run -> pdf;
+  run -> pngs;
+  run -> log;
+  run -> term;
+}
