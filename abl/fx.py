@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -6,13 +7,20 @@ from .models import FXProvider, Invoice
 
 __all__ = [
     "FXProvider",
+    "FXConversionError",
     "FixedFXProvider",
     "convert_to_cad",
     "make_fixed_fx_provider",
+    "require_supported_currencies",
     "valuation_date",
 ]
 
 DEFAULT_USD_CAD = Decimal("1.44")
+SUPPORTED_CURRENCIES = frozenset({"CAD", "USD"})
+
+
+class FXConversionError(ValueError):
+    """Raised when an invoice can't be converted for collateral processing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +67,26 @@ def valuation_date(inv: Invoice, as_of: date) -> date:
     return as_of
 
 
+def require_supported_currency(inv: Invoice) -> None:
+    """Raises FXConversionError if the invoice isn't in a supported currency."""
+    if inv.currency.upper() in SUPPORTED_CURRENCIES:
+        return
+    label = inv.invoice_id or f"for {inv.client_name} dated {inv.invoice_date}"
+    raise FXConversionError(
+        f"unsupported currency - invoice {label} is denominated in "
+        f"{inv.currency.upper()} which is not supported for collateral processing"
+    )
+
+
+def require_supported_currencies(invoices: Iterable[Invoice]) -> None:
+    """Fails fast, before any pricing, on the first unsupported invoice."""
+    for inv in invoices:
+        require_supported_currency(inv)
+
+
 def convert_to_cad(inv: Invoice, as_of: date, fx: FXProvider) -> Invoice:
     """Normalizes an invoice to CAD at its valuation-date rate."""
+    require_supported_currency(inv)
     rate = fx(inv.currency, "CAD", valuation_date(inv, as_of))
     cad_amount = (inv.invoice_amount * rate).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP

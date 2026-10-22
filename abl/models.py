@@ -54,6 +54,7 @@ class LineStatus(StrEnum):
     ELIGIBLE = "ELIGIBLE"
     HAIRCUT = "HAIRCUT"
     INELIGIBLE = "INELIGIBLE"
+    CREDIT = "CREDIT"
 
 
 @dataclass(frozen=True, slots=True)

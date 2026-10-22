@@ -4,6 +4,7 @@ import logging
 from decimal import Decimal
 from pathlib import Path
 
+from .fx import FXConversionError
 from .fxdata import fetch_usd_cad_series
 from .models import (
     CertificateParams,
@@ -43,6 +44,8 @@ def main(settings: ReportSettings | None = None) -> None:
         outputs = generate_report_pack(cfg)
     except FileNotFoundError as err:
         raise SystemExit(str(err)) from err
+    except FXConversionError as err:
+        raise SystemExit(f"FXConversionError: {err}") from err
     for name, path in outputs.items():
         print(f"{name}: {path}")
 

@@ -1,10 +1,15 @@
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from .fx import FXProvider, convert_to_cad, valuation_date
+from .fx import (
+    FXProvider,
+    convert_to_cad,
+    require_supported_currency,
+    valuation_date,
+)
 from .models import (
     CollateralReport,
     IneligibilityReason,
@@ -50,6 +55,7 @@ class _Snapshot:
 
 def _price(inv: Invoice, snapshot_date: date, fx: FXProvider) -> _Priced:
     """Converts an open invoice to CAD, keeping the booked invoice and the rate."""
+    require_supported_currency(inv)
     rate = fx(inv.currency, "CAD", valuation_date(inv, snapshot_date))
     return _Priced(inv, convert_to_cad(inv, snapshot_date, fx), rate)
 
@@ -266,6 +272,25 @@ def _apply_concentration_cap(
     return final_eligible, records, lines
 
 
+def _split_credit_notes(
+    priced: Sequence[_Priced],
+) -> tuple[list[_Priced], list[_Priced]]:
+    """Separates credit notes (negative amounts) from invoices."""
+    credits = [p for p in priced if p.cad.invoice_amount < Decimal("0.00")]
+    invoices = [p for p in priced if p.cad.invoice_amount >= Decimal("0.00")]
+    return credits, invoices
+
+
+def _credit_line(priced: _Priced, snap: _Snapshot) -> InvoiceLine:
+    """Audits a credit note, which comes off the borrowing base at full face."""
+    line = _make_line(priced, snap, priced.cad.invoice_amount, None, "")
+    return replace(
+        line,
+        status=LineStatus.CREDIT,
+        detail="Credit note: deducted in full from eligible collateral",
+    )
+
+
 def _line_order(line: InvoiceLine) -> tuple[str, date, date, str]:
     """Orders lines by debtor (case-blind), then issue date, due date and id."""
     return (
@@ -288,6 +313,8 @@ def evaluate_snapshot(
     (contra accounts, maximum overdue aging, cross-default delinquency ratios),
     prorates debtor concentration excesses against the single-client threshold,
     and calculates effective borrowing capacity net of dilution and FX reserves.
+    Credit notes only ever reduce capacity: they come off eligible collateral at
+    full face, which is floored at zero.
     Each open invoice also gets an audit line saying how it fared.
     """
     week_dt = datetime.combine(snapshot_date, time(23, 59, 59))
@@ -306,6 +333,7 @@ def evaluate_snapshot(
             ineligible_summary=IneligibilitySummary(),
         )
 
+    credits, priced = _split_credit_notes(priced)
     open_invoices = [p.cad for p in priced]
     ratios = client_taint_ratios(
         open_invoices,
@@ -342,8 +370,11 @@ def evaluate_snapshot(
     ineligible_records.extend(capped_records)
 
     summary = summarize_ineligibles(ineligible_records)
-    total_eligible = sum(
-        (inv.invoice_amount for inv in final_eligible), Decimal("0.00")
+    credit_total = sum((p.cad.invoice_amount for p in credits), Decimal("0.00"))
+    total_eligible = max(
+        Decimal("0.00"),
+        sum((inv.invoice_amount for inv in final_eligible), Decimal("0.00"))
+        + credit_total,
     )
     total_ineligible = sum(
         (rec.ineligible_balance for rec in ineligible_records), Decimal("0.00")
@@ -363,5 +394,10 @@ def evaluate_snapshot(
         eligible_invoices=final_eligible,
         ineligible_invoices=ineligible_records,
         ineligible_summary=summary,
-        lines=tuple(sorted([*screened, *capped], key=_line_order)),
+        lines=tuple(
+            sorted(
+                [*screened, *capped, *(_credit_line(p, snap) for p in credits)],
+                key=_line_order,
+            )
+        ),
     )

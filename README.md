@@ -94,6 +94,19 @@ settled this week are listed at their settlement-date rate.
 
 The CSV's optional `Invoice Key` column becomes the invoice id shown here.
 
+### Data checks
+
+The importer and engine handle awkward rows as follows (details in `output/abl.log`):
+
+- **Credit notes** (negative amounts) come off eligible collateral at full face and
+  never raise borrowing capacity; the borrowing base is floored at zero.
+- **Paid before issued:** the paid date is floored to the issue date (warning). A paid
+  invoice is never collateral.
+- **Due before issued:** accepted as given, logged as an error.
+- **Duplicate `Invoice Key`:** warning only; both rows load.
+- **Currencies** other than CAD and USD stop the run with an `FXConversionError` naming
+  the invoice.
+
 ## Running Tests
 ```bash
 uv run pytest

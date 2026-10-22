@@ -109,6 +109,7 @@ def test_pack_writes_the_detail_page(tmp_path: Path) -> None:
         (LineStatus.ELIGIBLE, "0.00", "Eligible"),
         (LineStatus.INELIGIBLE, "100.00", "Ineligible"),
         (LineStatus.HAIRCUT, "27.00", "Haircut 27%"),
+        (LineStatus.CREDIT, "0.00", "Credit note"),
     ],
 )
 def test_status_text(status: LineStatus, ineligible: str, expected: str) -> None:

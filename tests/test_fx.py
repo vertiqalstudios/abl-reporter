@@ -3,7 +3,12 @@ from decimal import Decimal
 
 import pytest
 
-from abl.fx import convert_to_cad, make_fixed_fx_provider
+from abl.fx import (
+    FXConversionError,
+    convert_to_cad,
+    make_fixed_fx_provider,
+    require_supported_currencies,
+)
 from abl.models import Invoice
 
 
@@ -35,5 +40,45 @@ def test_unsupported_currency_raises() -> None:
     inv = Invoice(
         "Gamma Inc", date(2025, 1, 1), date(2025, 1, 31), Decimal("100.00"), "EUR"
     )
-    with pytest.raises(ValueError, match="Unsupported currency"):
+    with pytest.raises(FXConversionError, match="denominated in EUR"):
         convert_to_cad(inv, date(2025, 1, 15), fx)
+
+
+@pytest.mark.parametrize(
+    ("invoice_id", "expected"),
+    [
+        (
+            "INV-42",
+            "unsupported currency - invoice INV-42 is denominated in EUR "
+            "which is not supported for collateral processing",
+        ),
+        (
+            "",
+            "unsupported currency - invoice for Gamma Inc dated 2025-01-01 is "
+            "denominated in EUR which is not supported for collateral processing",
+        ),
+    ],
+)
+def test_unsupported_currency_message_names_the_invoice(
+    invoice_id: str, expected: str
+) -> None:
+    inv = Invoice(
+        "Gamma Inc",
+        date(2025, 1, 1),
+        date(2025, 1, 31),
+        Decimal("100.00"),
+        "EUR",
+        None,
+        invoice_id,
+    )
+    with pytest.raises(FXConversionError) as caught:
+        require_supported_currencies([inv])
+    assert str(caught.value) == expected
+
+
+def test_supported_currencies_pass() -> None:
+    invoices = [
+        Invoice("A", date(2025, 1, 1), date(2025, 1, 31), Decimal("1.00"), code)
+        for code in ("CAD", "USD", "usd")
+    ]
+    require_supported_currencies(invoices)
