@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .certificate import generate_certificate
+from .fx import require_supported_currencies
 from .fxdata import FXMarket, format_fx_note, load_fx_market
 from .importer import load_invoices_from_csv
 from .models import ReportSettings
@@ -18,6 +19,7 @@ def generate_report_pack(settings: ReportSettings | None = None) -> dict[str, Pa
     """
     cfg = settings if settings is not None else ReportSettings()
     invoices = tuple(load_invoices_from_csv(cfg.input_source))
+    require_supported_currencies(invoices)
 
     as_of = cfg.resolve_as_of()
     first_date = min((inv.invoice_date for inv in invoices), default=as_of)

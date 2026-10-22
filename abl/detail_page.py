@@ -104,6 +104,11 @@ def _styles(theme: ReportPalette, fonts: tuple[str, str, str]) -> _Styles:
                 parent=bold_cell,
                 textColor=colors.HexColor(theme.alert),
             ),
+            LineStatus.CREDIT: ParagraphStyle(
+                "StatusCredit",
+                parent=bold_cell,
+                textColor=colors.HexColor(theme.accent),
+            ),
         },
     )
 
@@ -121,6 +126,8 @@ def _status_text(line: InvoiceLine) -> str:
             return f"Haircut {line.haircut_pct:.0%}"
         case LineStatus.INELIGIBLE:
             return "Ineligible"
+        case LineStatus.CREDIT:
+            return "Credit note"
 
 
 def _invoice_row(line: InvoiceLine, st: _Styles) -> list[Paragraph]:

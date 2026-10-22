@@ -2,6 +2,8 @@
 
 import csv
 import io
+import logging
+from collections import Counter
 from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -9,6 +11,8 @@ from pathlib import Path
 from typing import TextIO
 
 from .models import Invoice
+
+log = logging.getLogger(__name__)
 
 REQUIRED_HEADERS: tuple[str, ...] = (
     "Client Name",
@@ -57,6 +61,48 @@ def _parse_optional_date(raw: str, field_name: str, line_num: int) -> date | Non
         ) from err
 
 
+def _label(invoice_id: str, line_num: int) -> str:
+    """Names a row for log messages: its invoice key, else its CSV line."""
+    return f"invoice {invoice_id}" if invoice_id else f"line {line_num}"
+
+
+def _floor_paid_date(
+    paid_date: date | None, invoice_date: date, label: str
+) -> date | None:
+    """Floors a paid date that precedes issue to the issue date, with a warning.
+
+    A paid invoice is never collateral, so flooring only keeps the dates coherent.
+    """
+    if paid_date is None or paid_date >= invoice_date:
+        return paid_date
+    log.warning(
+        "%s paid %s before it was issued %s; paid date floored to the issue date",
+        label,
+        paid_date,
+        invoice_date,
+    )
+    return invoice_date
+
+
+def _alert_if_due_before_issue(invoice_date: date, due_date: date, label: str) -> None:
+    """Alerts on a due date before issue; the invoice is still accepted as given."""
+    if due_date < invoice_date:
+        log.error(
+            "%s is due %s before it was issued %s; accepted as given",
+            label,
+            due_date,
+            invoice_date,
+        )
+
+
+def warn_on_duplicate_ids(invoices: Iterable[Invoice]) -> None:
+    """Warns about repeated invoice keys, which would double-count collateral."""
+    counts = Counter(inv.invoice_id for inv in invoices if inv.invoice_id)
+    for invoice_id, count in counts.items():
+        if count > 1:
+            log.warning("Invoice key %s appears %d times", invoice_id, count)
+
+
 def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
     """Parses and validates a single CSV row into an Invoice object."""
     client_name = row["Client Name"].strip()
@@ -74,14 +120,17 @@ def parse_invoice_row(row: dict[str, str], line_num: int) -> Invoice:
         row["Invoice Paid Date"], "Invoice Paid Date", line_num
     )
 
+    invoice_id = (row.get("Invoice Key") or "").strip()
+    label = _label(invoice_id, line_num)
+    _alert_if_due_before_issue(invoice_date, due_date, label)
     return Invoice(
         client_name=client_name,
         invoice_date=invoice_date,
         due_date=due_date,
         invoice_amount=invoice_amount,
         currency=currency,
-        paid_date=paid_date,
-        invoice_id=(row.get("Invoice Key") or "").strip(),
+        paid_date=_floor_paid_date(paid_date, invoice_date, label),
+        invoice_id=invoice_id,
     )
 
 
@@ -92,6 +141,7 @@ def parse_invoices(rows: Iterable[dict[str, str]]) -> list[Invoice]:
         if not any(v.strip() for v in row.values()):
             continue
         invoices.append(parse_invoice_row(row, line_num))
+    warn_on_duplicate_ids(invoices)
     return invoices
 
 

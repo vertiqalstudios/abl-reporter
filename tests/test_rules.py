@@ -21,6 +21,18 @@ from abl.rules import (
 
 
 @pytest.mark.parametrize(
+    "as_of",
+    [date(2025, 1, 15), date(2025, 2, 1), date(2025, 2, 2), date(2025, 6, 1)],
+)
+def test_invoice_paid_before_issue_is_never_open(as_of: date) -> None:
+    inv = Invoice(
+        "Acme", date(2025, 2, 1), date(2025, 3, 1), Decimal("100.00"), "CAD",
+        paid_date=date(2025, 1, 20),
+    )  # fmt: skip
+    assert is_invoice_open(inv, as_of) is False
+
+
+@pytest.mark.parametrize(
     ("invoice_date", "due_date", "paid_date", "as_of", "expected_open"),
     [
         # Future invoice

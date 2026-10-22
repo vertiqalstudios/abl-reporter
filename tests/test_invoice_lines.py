@@ -157,3 +157,16 @@ def test_status_comes_from_the_amounts(
 def test_no_open_invoices_means_no_lines() -> None:
     report = evaluate_snapshot([], AS_OF, CRITERIA, FX)
     assert report.lines == ()
+
+
+@pytest.mark.parametrize(
+    "as_of", [date(2026, 2, 20), date(2026, 3, 1), date(2026, 3, 13), date(2026, 6, 1)]
+)
+def test_invoice_paid_before_issue_is_never_collateral(as_of: date) -> None:
+    inv = Invoice(
+        "Acme", date(2026, 3, 1), date(2026, 4, 30), Decimal("1000"), "CAD",
+        paid_date=date(2026, 2, 25),
+    )  # fmt: skip
+    report = evaluate_snapshot([inv], as_of, CRITERIA, FX)
+    assert report.eligible_amount_cad == Decimal("0.00")
+    assert report.lines == ()
