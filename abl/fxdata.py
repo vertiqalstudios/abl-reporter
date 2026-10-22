@@ -64,17 +64,32 @@ def _http_get(url: str, timeout: float) -> bytes:
         return response.read()
 
 
+def _usable_rate(day: str, value: str) -> Decimal | None:
+    """Returns the rate, or None (logged) for a blank or non-positive observation."""
+    rate = Decimal(value) if value.strip() else None
+    if rate is not None and rate > 0:
+        return rate
+    log.warning("Skipping unusable Bank of Canada rate on %s: %r", day, value)
+    return None
+
+
 def parse_boc_observations(body: bytes) -> dict[date, Decimal]:
-    """Parses a Valet `observations` JSON payload into CAD per USD by date."""
+    """Parses a Valet `observations` JSON payload into CAD per USD by date.
+
+    Blank or non-positive observations are skipped, so one bad day does not
+    discard the rest of the series.
+    """
     try:
         rows = json.loads(body)["observations"]
-        return {
-            date.fromisoformat(row["d"]): Decimal(row[BOC_SERIES]["v"]) for row in rows
+        parsed = {
+            date.fromisoformat(row["d"]): _usable_rate(row["d"], row[BOC_SERIES]["v"])
+            for row in rows
         }
     except (ValueError, KeyError, TypeError, ArithmeticError) as err:
         snippet = body[:BODY_SNIPPET].decode(errors="replace")
         log.error("Unparseable Bank of Canada payload (%s): %s", err, snippet)
         raise FXDataError(f"Unexpected Bank of Canada response: {err!r}") from err
+    return {day: rate for day, rate in parsed.items() if rate is not None}
 
 
 def fetch_usd_cad_series(
@@ -124,6 +139,8 @@ def realized_volatility(
     window_start = window_end - timedelta(days=window_days)
     days = sorted(day for day in series if window_start <= day <= window_end)
     rates = [float(series[day]) for day in days]
+    if any(rate <= 0 for rate in rates):
+        raise FXDataError(f"Non-positive USD/CAD rate in {window_start}..{window_end}")
     returns = [math.log(b / a) for a, b in zip(rates, rates[1:])]
     if len(returns) < MIN_RETURNS:
         raise FXDataError(

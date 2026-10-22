@@ -24,7 +24,8 @@ def check_contra(
     client_name: str, contra_clients: frozenset[str]
 ) -> IneligibilityReason | None:
     """Identifies debtor accounts affiliated with self or intercompany accounts."""
-    if client_name.strip().lower() in contra_clients:
+    contra_names = {name.strip().lower() for name in contra_clients}
+    if client_name.strip().lower() in contra_names:
         return IneligibilityReason.CONTRA_ACCOUNT
     return None
 
