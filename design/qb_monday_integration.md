@@ -140,6 +140,44 @@ Immediate conclusions: due date, currency and exchange rate should not need impu
 the paid date needs Payment plus Deposit records; credit memos exist as their own record
 type, which matches our credit-note policy.
 
+### 5a. Sandbox findings (live, 2026-10-22)
+
+Sandbox company: Canadian, home currency CAD, multicurrency **on**, with USD, EUR and HKD
+active. Read-only calls only. It holds 16 invoices, 9 payments, 1 deposit, 0 credit memos
+and 29 customers, all in CAD. Sandbox data is fake; the sample JSON stays in the
+scratchpad and is not committed.
+
+- **Auth:** the authorization-code exchange worked. Access tokens last 3,600 seconds; the
+  refresh token lasts 8,726,400 seconds (about 101 days, rolling), which settles the
+  conflicting figures in section 5. A refresh returns a new refresh token.
+- **Invoice fields confirmed:** `Id`, `SyncToken`, `DocNumber`, `TxnDate`, `DueDate` (from
+  `SalesTermRef`, Net 30 here), `TotalAmt`, `Balance`, `HomeTotalAmt`, `HomeBalance`,
+  `CurrencyRef`, `ExchangeRate` (1 for CAD), `CustomerRef` (id and name), `LinkedTxn`,
+  `CustomField` (empty here), `MetaData`. No `PONumber` field appeared.
+- **Timestamps carry a local offset** (for example `-07:00`), so they must be converted to
+  UTC on the way in. `TxnDate` and `DueDate` are plain dates.
+- **Paid date:** an invoice's `LinkedTxn` lists `Payment` ids (also `Estimate` and
+  `ReimburseCharge`). The paid date is the linked `Payment.TxnDate` of the payment that
+  takes `Balance` to 0. A Payment has only `TxnDate` and `DepositToAccountRef`; no deposit
+  date.
+- **Deposits:** here every payment goes straight to the Chequing account, and the one
+  Deposit has two manual lines with **no link to any payment**. So in this sandbox payment
+  date is the only paid date. Whether your real company uses Undeposited Funds plus
+  batched Deposits, and whether Deposit lines link back to payments, must be checked in
+  the real data.
+- **Overpayments:** two payments exceed their invoice (`UnappliedAmt` 454.83 and 974.63).
+  The invoice shows `Balance` 0 and the excess sits as an unapplied customer credit. The
+  database should keep `UnappliedAmt`.
+- **Exchange rates:** `GET exchangerate?sourcecurrencycode=USD&asofdate=...` returns a
+  USD to CAD rate for a date (1.414157 on 2026-10-16). Useful as a cross-check on our Bank
+  of Canada series; its source is not stated.
+- **PDF:** `GET invoice/{id}/pdf` with `Accept: application/pdf` returned a valid PDF
+  (18 KB). Confirmed; an audit exhibit only.
+- **Change data capture:** the endpoint answers; nothing had changed in 30 days here.
+- **Not yet seen:** a foreign-currency invoice (so `ExchangeRate` other than 1), a credit
+  memo, a void, a deletion, and a payment deposited through Undeposited Funds. Creating
+  these in the sandbox needs write calls, which need your OK.
+
 ## 6. Intuit sandbox: what you need to do, then what I will do
 
 You need your own Intuit developer login. The CFO is only needed for the real companies.
