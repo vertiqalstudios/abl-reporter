@@ -35,3 +35,9 @@ def test_runner_dataframe_generation() -> None:
     assert df["eligible_collateral"].iloc[0] == 10000.0
     assert df["ineligible_collateral"].iloc[0] == 0.0
     assert df["net_available_borrow"].iloc[0] == 8000.0
+
+
+def test_runner_defaults_criteria_and_fx() -> None:
+    invoice = Invoice("A", date(2025, 1, 1), date(2025, 1, 31), Decimal("100"), "USD")
+    reports, _ = run_collateral_report([invoice], date(2025, 2, 1), date(2025, 2, 7))
+    assert reports[0].gross_amount_cad == Decimal("144.00")

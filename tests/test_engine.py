@@ -46,3 +46,19 @@ def test_full_pipeline_reconciliation() -> None:
         if r.reason is IneligibilityReason.CONCENTRATION_EXCESS
     ]
     assert len(excess_records) == 2
+
+
+def test_cross_default_off_leaves_a_tainted_debtor_eligible() -> None:
+    as_of = date(2026, 3, 13)
+    invoices = [
+        Invoice("Slow", date(2025, 11, 1), date(2025, 12, 1), Decimal("600"), "CAD"),
+        Invoice("Slow", date(2026, 3, 1), date(2026, 4, 30), Decimal("300"), "CAD"),
+        Invoice("Other", date(2026, 3, 1), date(2026, 4, 30), Decimal("900"), "CAD"),
+    ]
+    fx = make_fixed_fx_provider()
+    on = evaluate_snapshot(invoices, as_of, LendingCriteria(), fx)
+    off = evaluate_snapshot(
+        invoices, as_of, LendingCriteria(cross_default_enabled=False), fx
+    )
+    assert on.ineligible_summary.cross_default == Decimal("300.00")
+    assert off.ineligible_summary.cross_default == Decimal("0.00")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from abl.activity import SettledLine
 from abl.certificate import generate_certificate_pdf
 from abl.detail_page import (
     _groups,
@@ -179,3 +180,77 @@ def test_footer_says_page_n_of_total_with_status_and_disclaimer() -> None:
     assert any("Page 2 of 3" in text for text in canvas.text)
     assert "STATUS: PRO-FORMA" in canvas.text
     assert "CONFIDENTIAL" in canvas.text
+
+
+def _settled(count: int) -> list[SettledLine]:
+    return [
+        SettledLine(
+            client_name=f"Paid {n}",
+            invoice_id=f"P{n}",
+            invoice_date=AS_OF - timedelta(days=30),
+            paid_date=AS_OF - timedelta(days=2),
+            currency="USD",
+            face_amount=Decimal("100.00"),
+            fx_rate=Decimal("1.3500"),
+            cad_amount=Decimal("135.00"),
+        )
+        for n in range(count)
+    ]
+
+
+def test_settled_activity_follows_the_log_as_a_table() -> None:
+    flow = detail_flowables(_report(3), _settled(2), "", ReportPalette(), FONTS)
+    heading, table = flow[-2], flow[-1]
+    assert "SETTLED THIS WEEK" in heading.text
+    assert type(table).__name__ == "Table"
+    assert len(table._cellvalues) == 3  # header plus two settled invoices
+
+
+def test_no_settled_activity_adds_no_section() -> None:
+    flow = detail_flowables(_report(3), (), "", ReportPalette(), FONTS)
+    assert "SETTLED" not in " ".join(getattr(item, "text", "") for item in flow)
+
+
+def test_certificate_renders_with_settled_activity(tmp_path: Path) -> None:
+    target = tmp_path / "cert.pdf"
+    generate_certificate_pdf(
+        report=_report(10),
+        criteria=LendingCriteria(),
+        params=CertificateParams(),
+        concentrations=[],
+        output_path=target,
+        settled=_settled(60),
+    )
+    assert len(PAGE_OBJECT.findall(target.read_bytes())) >= 2
+
+
+def test_one_huge_debtor_splits_across_pages(tmp_path: Path) -> None:
+    invoices = [
+        Invoice(
+            "Giant",
+            AS_OF - timedelta(days=20),
+            AS_OF + timedelta(days=30),
+            Decimal("1000"),
+            "CAD",
+            invoice_id=f"G{n:04d}",
+        )
+        for n in range(400)
+    ]
+    report = evaluate_snapshot(invoices, AS_OF, LendingCriteria(), FX)
+    assert len(_groups(report.lines)) == 1
+    assert _pages(report, tmp_path) >= 3
+
+
+@pytest.mark.parametrize("count", [3, 10, 400])
+def test_footer_total_matches_the_real_page_count(
+    count: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    totals: list[int] = []
+
+    def spy(status: str, disclaimer: str, total: int, *rest: object) -> object:
+        totals.append(total)
+        return make_footer_painter(status, disclaimer, total, *rest)
+
+    monkeypatch.setattr("abl.certificate.make_footer_painter", spy)
+    pages = _pages(_report(count), tmp_path)
+    assert totals[-1] == pages  # the second pass uses the measured count

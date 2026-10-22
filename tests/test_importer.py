@@ -2,6 +2,7 @@ import io
 import logging
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -205,3 +206,55 @@ def test_blank_invoice_keys_are_not_duplicates(
     with caplog.at_level(logging.WARNING, logger="abl.importer"):
         load_invoices_from_csv(text)
     assert caplog.records == []
+
+
+def test_blank_amount_is_rejected() -> None:
+    text = _csv("Acme,2025-02-01,2025-03-01,,CAD,")
+    with pytest.raises(ValueError, match="Line 2: 'Invoice Amount' cannot be empty"):
+        load_invoices_from_csv(text)
+
+
+def test_blank_currency_is_rejected() -> None:
+    text = _csv("Acme,2025-02-01,2025-03-01,100,,")
+    with pytest.raises(ValueError, match="Line 2: 'Currency' cannot be empty"):
+        load_invoices_from_csv(text)
+
+
+def test_blank_due_date_is_rejected() -> None:
+    text = _csv("Acme,2025-02-01,,100,CAD,")
+    with pytest.raises(ValueError, match="Line 2: 'Due Date' cannot be empty"):
+        load_invoices_from_csv(text)
+
+
+def test_bad_paid_date_is_rejected() -> None:
+    text = _csv("Acme,2025-02-01,2025-03-01,100,CAD,03/01/2025")
+    with pytest.raises(ValueError, match="invalid ISO date '03/01/2025'"):
+        load_invoices_from_csv(text)
+
+
+@pytest.mark.parametrize("text", ["", HEADER + "\n", HEADER + "\n,,,,,\n"])
+def test_empty_files_load_no_invoices(text: str) -> None:
+    assert load_invoices_from_csv(io.StringIO(text)) == []
+
+
+def test_amount_formatting_is_stripped() -> None:
+    text = _csv('Acme,2025-02-01,2025-03-01,"$1,234.50",CAD,')
+    (inv,) = load_invoices_from_csv(text)
+    assert inv.invoice_amount == Decimal("1234.50")
+
+
+def test_loads_from_a_path_with_a_bom(tmp_path: Path) -> None:
+    target = tmp_path / "in.csv"
+    target.write_text(_csv("Acme,2025-02-01,2025-03-01,100,CAD,"), encoding="utf-8-sig")
+    assert len(load_invoices_from_csv(target)) == 1
+
+
+def test_loads_from_a_path_given_as_a_string(tmp_path: Path) -> None:
+    target = tmp_path / "in.csv"
+    target.write_text(_csv("Acme,2025-02-01,2025-03-01,100,CAD,"))
+    assert len(load_invoices_from_csv(str(target))) == 1
+
+
+def test_missing_file_raises_file_not_found(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="CSV file not found"):
+        load_invoices_from_csv(tmp_path / "absent.csv")

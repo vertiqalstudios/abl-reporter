@@ -82,3 +82,26 @@ def test_supported_currencies_pass() -> None:
         for code in ("CAD", "USD", "usd")
     ]
     require_supported_currencies(invoices)
+
+
+@pytest.mark.parametrize(
+    ("from_curr", "to_curr", "expected"),
+    [
+        ("USD", "CAD", Decimal("1.44")),
+        ("CAD", "USD", Decimal("0.69444444")),
+        ("usd", "usd", Decimal("1.00")),
+    ],
+)
+def test_fixed_provider_rates(from_curr: str, to_curr: str, expected: Decimal) -> None:
+    fx = make_fixed_fx_provider(Decimal("1.44"))
+    assert fx(from_curr, to_curr, date(2025, 1, 1)) == expected
+
+
+def test_fixed_provider_rejects_unknown_pair() -> None:
+    fx = make_fixed_fx_provider()
+    with pytest.raises(ValueError, match="Unsupported currency pair: EUR to CAD"):
+        fx("EUR", "CAD", date(2025, 1, 1))
+
+
+def test_fixed_provider_is_valid_on_any_date() -> None:
+    assert make_fixed_fx_provider().rate_date(date(2025, 6, 1)) == date(2025, 6, 1)
