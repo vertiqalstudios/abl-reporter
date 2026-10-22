@@ -142,8 +142,10 @@ class CustomerPalette:
     Deliberately separate from `ReportPalette`: its debtor shades are one ramp,
     these are distinct hues kept clear of its accent and alert. The order passes
     colour-vision checks both as a plain stack and as the stream's centre-out
-    stack, so reorder only after re-validating both. The last two hues (ranks 6
-    and 7) are not yet colour-vision validated.
+    stack, so reorder only after re-validating both. All seven pass the dataviz
+    validator on white for adjacent pairs in both stack orders (worst CVD gap
+    8.3, cyan next to pink). Non-adjacent pairs do not (olive vs orange, deutan
+    2.7), as with the original five, so charts rely on their legend.
     """
 
     named: tuple[str, ...] = (
