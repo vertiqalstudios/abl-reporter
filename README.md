@@ -22,7 +22,9 @@ Certificate PDF (`bbc_certificate.pdf`) and five charts to `output/`, printing e
 There are no command-line flags: `abl-report` takes every option from
 `build_default_settings()` in `abl/__main__.py`, so **edit that function to change what
 the command does** (input file, covenants, reserves, certificate status and loan figures,
-colours). Its current defaults read `invoices_real_2.csv` and fetch live rates. To run with
+colours). A comment block there lists every setting with its default and effect.
+It currently overrides only the input file (`invoices_real_2.csv`), live rates and the
+certificate figures. To run with
 different settings without editing it, see [Custom settings](#custom-settings).
 
 The CSV needs the columns `Client Name, Invoice Date, Due Date, Invoice Amount, Currency,

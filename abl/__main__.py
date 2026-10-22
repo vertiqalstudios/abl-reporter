@@ -8,9 +8,6 @@ from .fx import FXConversionError
 from .fxdata import fetch_usd_cad_series
 from .models import (
     CertificateParams,
-    CustomerPalette,
-    LendingCriteria,
-    ReportPalette,
     ReportSettings,
     ReportStatus,
 )
@@ -51,73 +48,57 @@ def main(settings: ReportSettings | None = None) -> None:
 
 
 def build_default_settings() -> ReportSettings:
-    """Default report settings - these are easiest to tweak."""
+    """Settings for `abl-report`: edit here to change what the command does."""
+    # Only values that differ from the ReportSettings defaults are set below. To
+    # change another, add it to the call. Every setting, its default and its effect:
+    #
+    # RUN
+    #   input_source      invoices.csv  CSV to read: a Path, CSV text or open stream
+    #   output_dir        output        folder for the PDF, charts and abl.log
+    #   as_of             this Friday   date the certificate is struck and the last
+    #                                   chart week; later invoices/payments ignored
+    #   chart_weeks       52            weeks of chart history (52 = 1 year); older
+    #                                   invoices still feed opening AR, DSO and taint
+    #   top_n_customers   10            customers charted individually in the Top N
+    #                                   charts; the rest group as Other
+    #   fx_fetcher        None          fetch_usd_cad_series = live Bank of Canada
+    #                                   rates; None = pinned 1 USD = 1.44 CAD
+    #   fx                None          explicit FXProvider; wins over fx_fetcher
+    #
+    # criteria=LendingCriteria(...)
+    #   advance_rate                  0.85   share of eligible collateral lent
+    #   dilution_reserve_pct          0.025  cushion deducted from the advance rate
+    #   fx_reserve_pct                0.025  USD/CAD cushion deducted likewise
+    #                                        (advance - dilution - fx = effective rate)
+    #   max_client_concentration_pct  0.30   one debtor's cap, as a share of eligible;
+    #                                        the excess is ineligible
+    #   max_overdue_days              90     invoices older past due are ineligible
+    #   taint_past_due_days           90     age at which a balance counts toward taint
+    #   taint_threshold_pct           0.50   past-due share that taints a debtor's
+    #                                        other invoices
+    #   cross_default_enabled         True   False switches the taint rule off
+    #   contra_clients                {"self"}  affiliate debtors, always ineligible;
+    #                                        case-insensitive, eg {"vertiqal"}
+    #
+    # certificate=CertificateParams(...)
+    #   status            PRO_FORMA     PRO_FORMA, DRAFT or CERTIFIED: badge and
+    #                                   footer wording; CERTIFIED adds the signature
+    #   existing_borrow   0.00          loan outstanding, deducted from the borrowing
+    #                                   base to give Net Excess Availability
+    #   facility_limit    2,000,000     shown in the header and scales the waterfall
+    #   currency          CAD           label only: amounts are always CAD
+    #   disclaimer        (see models)  red legal text in the footer
+    #
+    # palette=ReportPalette(...)        certificate and chart colours
+    # customer_palette=CustomerPalette(...)  ranked customer colours in the charts
     return ReportSettings(
-        criteria=LendingCriteria(
-            max_client_concentration_pct=Decimal("0.30"),
-            max_overdue_days=90,
-            taint_past_due_days=90,
-            taint_threshold_pct=Decimal("0.50"),
-            cross_default_enabled=True,
-            advance_rate=Decimal("0.85"),  # % of Collateral Borrow-able against
-            dilution_reserve_pct=Decimal("0.025"),  # Dilution cushion
-            fx_reserve_pct=Decimal("0.025"),  # CADUSD volatility cushion, flat
-            # Advance - Dilution - FX = Eff Advance Rate
-            contra_clients=frozenset(
-                {"self"}
-            ),  # Names of "Self" debtors - eg Vertiqal, Gamelancer
-        ),
-        palette=ReportPalette(
-            primary="#0F172A",
-            secondary="#334155",
-            muted="#64748B",
-            subtle="#94A3B8",
-            accent="#2563EB",
-            alert="#DC2626",
-            border="#E2E8F0",
-            bg_subtle="#F8FAFC",
-            font_family="Helvetica Neue",
-            debtor_colors=(
-                "#1E293B",
-                "#334155",
-                "#475569",
-                "#64748B",
-                "#94A3B8",
-                "#CBD5E1",
-            ),
-            grid="#CBD5E1",
-        ),
-        customer_palette=CustomerPalette(
-            named=(
-                "#eb6834",
-                "#1baf7a",
-                "#9085e9",
-                "#eda100",
-                "#e87ba4",
-                "#35b7d4",
-                "#8c9a2b",
-            ),
-            other="#DAD7D0",
-        ),
+        input_source=Path("invoices_real_2.csv"),
+        fx_fetcher=fetch_usd_cad_series,
         certificate=CertificateParams(
             status=ReportStatus.PRO_FORMA,
-            existing_borrow=Decimal("0.00"),  # outstanding loan balance
+            existing_borrow=Decimal("0.00"),
             facility_limit=Decimal("2000000.00"),
-            currency="CAD",
-            disclaimer=(
-                "Highly confidential, Material Non-Public Information. "
-                "For Internal Use and Lender Use only"
-            ),
         ),
-        fx=None,
-        fx_fetcher=fetch_usd_cad_series,  # live USD/CAD prices collateral; None=pinned
-        input_source=Path("invoices_real_2.csv"),
-        output_dir=Path("output"),
-        as_of=None,
-        # Weeks of history charted (52 = 1 year); raise or lower to vary the span.
-        # Earlier invoices still feed opening AR, DSO and taint.
-        chart_weeks=52,
-        top_n_customers=10,  # Customers ranked and tagged in the Top N charts
     )
 
 
