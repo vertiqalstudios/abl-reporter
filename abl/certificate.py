@@ -1,5 +1,6 @@
 """Borrowing Base Certificate PDF report generation using ReportLab."""
 
+import io
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -15,9 +16,26 @@ from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
+    NextPageTemplate,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
+from .activity import SettledLine, settled_in_week
 from .bbc import generate_bbc
+from .detail_page import (
+    FIRST_TEMPLATE,
+    detail_flowables,
+    detail_page_templates,
+    make_footer_painter,
+)
 from .fx import FXProvider, convert_to_cad, make_fixed_fx_provider
 from .importer import load_invoices_from_csv
 from .models import (
@@ -504,11 +522,40 @@ def generate_certificate_pdf(
     palette: ReportPalette | None = None,
     output_path: str | Path = "bbc_certificate.pdf",
     fx_note: str = "",
+    settled: Sequence[SettledLine] = (),
 ) -> Path:
-    """Builds the single-page landscape Borrowing Base Certificate PDF."""
+    """Builds the landscape Borrowing Base Certificate PDF.
 
+    Page 1 is the certificate. When the report carries invoice lines, detail pages
+    follow, listing every open invoice and how it fared. The document is rendered
+    once to count its pages, then again so each footer can say "of N".
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    args = (report, criteria, params, concentrations, currency_breakdowns)
+    extras = (invoice_start, invoice_end, palette, fx_note, settled)
+    pages = 1
+    if report.lines:
+        pages = _render_certificate(*args, io.BytesIO(), pages, *extras)
+    _render_certificate(*args, path, pages, *extras)
+    return path
+
+
+def _render_certificate(
+    report: CollateralReport,
+    criteria: LendingCriteria,
+    params: CertificateParams,
+    concentrations: Sequence[DebtorConcentration],
+    currency_breakdowns: Sequence[CurrencyBreakdown] | None,
+    output: Path | io.BytesIO,
+    total_pages: int,
+    invoice_start: date | None,
+    invoice_end: date | None,
+    palette: ReportPalette | None,
+    fx_note: str,
+    settled: Sequence[SettledLine],
+) -> int:
+    """Renders the certificate to `output` and returns how many pages it took."""
 
     theme = palette if palette is not None else ReportPalette()
     font_reg, font_bold, font_oblique = _resolve_fonts()
@@ -531,8 +578,8 @@ def generate_certificate_pdf(
         bg_subtle=c_bg_subtle,
     )
 
-    doc = SimpleDocTemplate(
-        str(path),
+    doc = BaseDocTemplate(
+        str(output) if isinstance(output, Path) else output,
         pagesize=landscape(letter),
         leftMargin=36,
         rightMargin=36,
@@ -1093,7 +1140,7 @@ def generate_certificate_pdf(
                 ParagraphStyle("FootL", parent=s_body, fontSize=6.5, textColor=c_muted),
             ),
             Paragraph(
-                "Vertiqal Studios ABL Reporter &bull; Page 1 of 1",
+                f"Vertiqal Studios ABL Reporter &bull; Page 1 of {total_pages}",
                 ParagraphStyle(
                     "FootR", parent=s_body, fontSize=6.5, alignment=2, textColor=c_muted
                 ),
@@ -1131,8 +1178,31 @@ def generate_certificate_pdf(
     doc_elements.extend(_definition_paragraphs(s_note))
     doc_elements.append(footer_table)
 
+    first_page = PageTemplate(
+        id="certificate",
+        frames=[Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height)],
+    )
+    doc.addPageTemplates([first_page])
+    if report.lines:
+        fonts = (font_reg, font_bold, font_oblique)
+        painter = make_footer_painter(
+            f"STATUS: {params.status.value.replace('_', '-')} \u2014 {status_sub}.",
+            params.disclaimer,
+            total_pages,
+            theme,
+            fonts,
+        )
+        doc.addPageTemplates(detail_page_templates(doc, painter))
+        doc_elements.extend(
+            [
+                NextPageTemplate(FIRST_TEMPLATE),
+                PageBreak(),
+                *detail_flowables(report, settled, fx_note, theme, fonts),
+            ]
+        )
+
     doc.build(doc_elements)
-    return path
+    return int(doc.page)
 
 
 def _invoice_range(invoices: Sequence[Invoice], as_of: date) -> tuple[date, date]:
@@ -1189,4 +1259,5 @@ def generate_certificate(
         palette=cfg.palette,
         output_path=output_file,
         fx_note=fx_note,
+        settled=settled_in_week(invoices, as_of, fx),
     )
