@@ -180,8 +180,11 @@ This needs `dot` (Graphviz), `pandoc` and `xelatex` installed; the script says w
 missing. Edit the diagrams in `design/diagrams/*.dot`.
 
 ## Running Tests
+Install the development requirements once (`uv pip install -r requirements-dev.txt`), then:
+
 ```bash
 uv run pytest
+uv run pytest --cov=abl --cov-branch --cov-report=term-missing   # with coverage
 ```
 
 ## Authorship

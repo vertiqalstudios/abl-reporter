@@ -26,7 +26,7 @@ jobs:
       - name: Create virtual environment and install dependencies
         run: |
           uv venv --python 3.14
-          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
 
       - name: Run tests with pytest
         run: uv run pytest
