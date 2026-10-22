@@ -1,8 +1,11 @@
 # System Flow: Inputs, Outputs and Run Sequence
 
-How `abl-report` (`python -m abl`) turns an invoice extract into the Borrowing Base
-Certificate and charts. Diagrams are Graphviz sources in `diagrams/*.dot` with the rendered SVGs committed beside them; rebuild them and the PDFs with `uv run python design/render.py`. The certificate's
-layout and maths are in [certificate_design.md](certificate_design.md).
+How `abl-report` (`python -m abl`) turns an invoice CSV into the Borrowing Base Certificate
+and five charts. The certificate's layout and maths are in
+[certificate_design.md](certificate_design.md).
+
+The diagrams are Graphviz sources in `diagrams/*.dot`, with the rendered SVGs committed
+beside them. Rebuild them, and the PDFs, with `uv run python design/render.py`.
 
 ## 1. Inputs and outputs
 
@@ -25,8 +28,8 @@ layout and maths are in [certificate_design.md](certificate_design.md).
 
 ![Run sequence](diagrams/run_sequence.svg)
 
-Both branches get the same invoices, as-of date and FX provider, so the certificate and
-the charts always agree on prices.
+The certificate and the charts get the same invoices, as-of date and FX provider, so they
+always agree on prices.
 
 ### 2a. Certificate branch
 
@@ -36,15 +39,15 @@ the charts always agree on prices.
 
 ![How the charts are produced](diagrams/chart_branch.svg)
 
-Invoices before the window still count: they supply opening AR, DSO history and the
+Invoices before the chart window still count: they supply opening AR, DSO history and the
 taint ratios.
 
 ## 3. Collateral engine (`evaluate_snapshot`)
 
 ![The collateral engine pipeline](diagrams/engine.svg)
 
-The certificate then subtracts `existing_borrow` (a static figure in `CertificateParams`;
-there is no loan ledger yet) to give Net Excess Availability.
+The certificate then subtracts `existing_borrow` from the result to give Net Excess
+Availability. That is a single figure set in `CertificateParams`; there is no loan ledger yet.
 
 ## 4. Module map
 
