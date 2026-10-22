@@ -13,7 +13,7 @@ Guidance for AI coding agents (and humans) working in `abl-reporter`.
 
 ```bash
 uv venv --python 3.14
-uv pip install -r requirements.txt pre-commit
+uv pip install -r requirements-dev.txt
 uv run pre-commit install
 ```
 
